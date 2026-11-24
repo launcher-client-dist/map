@@ -165,7 +165,7 @@ function tip(layer, text, opts = {}) {
 
 function labelOf(m) {
   const f = m.fields || {};
-  if (m.kind === "spawn") return [f.monster || "?", f.count ? "×" + f.count : ""].join(" ").trim();
+  if (m.kind === "spawn") return [f.monster || "?", f.count > 1 ? "×" + f.count : ""].join(" ").trim();
   return f.label || f.text || "";
 }
 
