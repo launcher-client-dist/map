@@ -12,11 +12,18 @@ and posts the new link (with its list of changes) back in their ticket.
 - **Title:** the box in the bar names the map; the browser tab shows it ("Title - Opengea Map"). A link carries it;
   `?title=...` gives one to a link that has none.
 - **Coordinates:** the bar at the bottom shows the cell under the cursor; a click on the map copies a `/pos`-style line.
-- **Markers:** monster spawn (monster, how many, radius), boss (monster, when it comes, a note: a crown in a ringed
-  disc, the schedule under its name), point, area (paint cells: brush, rectangle, erase), route, note. Select one to drag it, change its fields or delete it. Undo/redo: the buttons, Ctrl+Z, Ctrl+Y.
+- **Markers:** monster spawn (monster, how many, radius), boss (picked from the game's bosses or any name typed, when
+  it comes, a note: a crown in a ringed disc, the schedule under its name), point, area (paint cells: brush, rectangle,
+  erase), route, note. Select one to drag it, change its fields or delete it. Undo/redo: the buttons, Ctrl+Z, Ctrl+Y.
 - **Map things:** rope, two-way rope, lever, hole, door, portal, elevator, NPC (name, when it is there, what it sells
   or does) (the **Objects** menu in the bar; **?** shows what each marker is). A two-way rope (goes and comes back) is
-  drawn with a head at both ends of its arrow and ↔ on its label; a rope's panel turns it two-way and back. A rope, hole, portal or elevator can say **where it leads**: place it and the page asks at once (tap the
+  drawn with a head at both ends of its arrow and ↔ on its label; a rope's panel turns it two-way and back.
+- **Schedules** (boss, NPC): a picker, Always / Every hour at minute :MM (real clock) / Game time from HH to HH (Day,
+  Night), with the words it will show under it (one game day is one real hour: the game window's real minutes too).
+  A listed boss with one fixed window fills it in (still editable). In the link: "" always, `h05`, `g18-06`; a free text
+  from an older link shows as "Custom: ..." until the picker replaces it.
+- **Combat lock** (rope, two-way rope, lever, hole, portal, elevator): a checkbox; ⚔ on the marker and its label: it
+  can't be used while the player is in battle. A rope, hole, portal or elevator can say **where it leads**: place it and the page asks at once (tap the
   spot, on any floor: change the floor above the map first (▲ ▼), or show floors side by side; **Skip** leaves it for
   later). Later: select it, then
   **Change**, **View**, **Remove**, or its destination floor in the panel; drag the small end marker to move it. Same
@@ -44,7 +51,10 @@ markers of a kind a page doesn't know are kept unchanged, so old links keep work
 Map things (rope .. elevator) came later as new kinds, ropes, holes, portals and elevators with an optional destination,
 and a link may end with its own fields (the title); still format 1: a page from before them keeps such a marker
 unchanged and ignores the title. The two-way rope, the boss and the NPC (codes 11..13) came after format 2: each is
-a length and a format-1 body, so the page before them keeps such a marker unchanged too.
+a length and a format-1 body, so the page before them keeps such a marker unchanged too. The combat lock is an
+"extra" field of the core kinds: in format 2 the records end with link flag 1's extra fields (every format-2 page reads
+past them; one from before drops only the lock), in format 1 a field key an older page skips; unset, a link is byte
+for byte what it was.
 
 Two made-up format-1 examples, which still open (a locked area "A", a spawn, a point and a note):
 `https://map.opengea.tech/?lang=en#1.Y2QIKGdhZGBhYWFiYGTgZU63YWJiACFGRkegAANvVCMjI0t4fk4aEwcLGyMTAwNHSi4jS0ZqUSoLMwMDv1s3IyNXcUFieZ5CZkpqIgMA`
@@ -61,7 +71,8 @@ The same two maps saved as format 2:
 
 - `index.html`, `style.css`, `app.js`: the page (Leaflet 1.9.4 from cdnjs, pinned with SRI).
 - `maplink.js`: the link format, no DOM (`npm test` runs `tests/` under Node).
-- `i18n.js`: the words; `monsters.js`: monster names for spawn markers.
+- `i18n.js`: the words; `monsters.js`: monster names for spawn markers; `bosses.js`: the bosses' names (and a fixed
+  window to prefill); `schedule.js`: the schedule codes and their words (no DOM).
 - `tiles/<client version>/<floor>/<zoom>/<x>_<y>.png`: the map, one set per game client version so an old link opens
   on its own map; `tiles/index.json` lists the sets, `tiles/<version>/meta.json` the floors and tiles. Floor `s` is the
   surface; the others are slices by height. Only the coloured pictures are published.

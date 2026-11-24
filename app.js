@@ -4,6 +4,8 @@ import * as ML from "./maplink.js";
 import * as FL from "./floors.js";
 import { MONSTERS } from "./monsters.js";
 import { LANGS, pickLang, translator } from "./i18n.js";
+import { parseSchedule, scheduleCode, scheduleText } from "./schedule.js";
+import { BOSSES, bossOf } from "./bosses.js";
 
 const lang = pickLang();
 const t = translator(lang);
@@ -19,23 +21,23 @@ const KIND_UI = {
   spawn: { color: "#e5484d", glyph: "⚔", fields: { monster: { input: "monster" }, count: { input: "int", min: 1, max: 99, def: 1 }, radius: { input: "int", min: 0, max: 40, def: 3 } } },
   // a boss: like a spawn, with when it comes (free text) under its name; a crown, a bigger disc with a ring
   boss: { color: "#8e1b3b", svg: svg('<path d="M2.5 13.5h11"/><path d="M3.2 11 2 4.6l3.4 2.9L8 2.8l2.6 4.7L14 4.6 12.8 11Z"/>'),
-    fields: { monster: { input: "monster" }, schedule: { input: "text" }, label: { input: "text", word: "field.bossLabel" } } },
+    fields: { monster: { input: "boss" }, schedule: { input: "schedule" }, label: { input: "text", word: "field.bossLabel" } } },
   poi: { color: "#f5a524", glyph: "★", fields: { label: { input: "text" } } },
   area: { color: "#30a46c", glyph: "▦", fields: { label: { input: "text" } } },
   route: { color: "#3e8ef7", glyph: "➜", fields: { label: { input: "text" } } },
   note: { color: "#a46cf5", glyph: "✎", fields: { text: { input: "longtext" } } },
   // map things (ropes, holes and portals lead somewhere: maplink.js's pointdest geometry)
-  rope: { color: "#a86f3c", svg: svg('<path d="M8 1.5v2"/><circle cx="8" cy="5" r="1.5"/><path d="M8 6.5c-2.2 1.1-2.2 2.9 0 4s2.2 2.9 0 4"/>'), fields: { label: { input: "text" } } },
+  rope: { color: "#a86f3c", svg: svg('<path d="M8 1.5v2"/><circle cx="8" cy="5" r="1.5"/><path d="M8 6.5c-2.2 1.1-2.2 2.9 0 4s2.2 2.9 0 4"/>'), fields: { label: { input: "text" }, combat: { input: "check" } } },
   // a two-way rope (goes and comes back): the rope with an arrow up and one down; its line has a head at both ends
-  rope2: { color: "#a86f3c", svg: svg('<path d="M8 1.5v2"/><circle cx="8" cy="5" r="1.5"/><path d="M8 6.5c-2.2 1.1-2.2 2.9 0 4s2.2 2.9 0 4"/><path d="M3 8V2.2M1.4 3.8 3 2.2l1.6 1.6M13 8v5.8M11.4 12.2 13 13.8l1.6-1.6" stroke-width="1.4"/>'), fields: { label: { input: "text" } } },
-  lever: { color: "#d6409f", svg: svg('<path d="M2.5 13.5h11"/><path d="M5 13.5a3 3 0 0 1 6 0"/><path d="M8 11 11.2 4.2"/><circle cx="11.6" cy="3.4" r="1.6" fill="currentColor"/>'), fields: { label: { input: "text" } } },
-  hole: { color: "#26292e", svg: svg('<path d="M8 1.5v4M6 3.8l2 2 2-2"/><ellipse cx="8" cy="10.5" rx="6" ry="3.5"/><ellipse cx="8" cy="11" rx="3.3" ry="1.7" fill="currentColor"/>'), fields: { label: { input: "text" } } },
+  rope2: { color: "#a86f3c", svg: svg('<path d="M8 1.5v2"/><circle cx="8" cy="5" r="1.5"/><path d="M8 6.5c-2.2 1.1-2.2 2.9 0 4s2.2 2.9 0 4"/><path d="M3 8V2.2M1.4 3.8 3 2.2l1.6 1.6M13 8v5.8M11.4 12.2 13 13.8l1.6-1.6" stroke-width="1.4"/>'), fields: { label: { input: "text" }, combat: { input: "check" } } },
+  lever: { color: "#d6409f", svg: svg('<path d="M2.5 13.5h11"/><path d="M5 13.5a3 3 0 0 1 6 0"/><path d="M8 11 11.2 4.2"/><circle cx="11.6" cy="3.4" r="1.6" fill="currentColor"/>'), fields: { label: { input: "text" }, combat: { input: "check" } } },
+  hole: { color: "#26292e", svg: svg('<path d="M8 1.5v4M6 3.8l2 2 2-2"/><ellipse cx="8" cy="10.5" rx="6" ry="3.5"/><ellipse cx="8" cy="11" rx="3.3" ry="1.7" fill="currentColor"/>'), fields: { label: { input: "text" }, combat: { input: "check" } } },
   door: { color: "#5b6b82", svg: svg('<path d="M4 14.5V3.5A1.5 1.5 0 0 1 5.5 2h5A1.5 1.5 0 0 1 12 3.5v11"/><path d="M2.5 14.5h11"/><circle cx="10" cy="8.8" r=".8" fill="currentColor"/>'), fields: { label: { input: "text" } } },
-  portal: { color: "#0fa3b8", svg: svg('<ellipse cx="8" cy="8" rx="4.6" ry="6.5"/><ellipse cx="8" cy="8" rx="2" ry="3.4"/><path d="M1.5 4.5l1 .6M14.5 11.5l-1-.6"/>'), fields: { label: { input: "text" } } },
-  elevator: { color: "#4c4fc9", svg: svg('<rect x="3" y="1.8" width="10" height="12.4" rx="1.6"/><path d="M8 3.9 10.3 6.6H5.7Z" fill="currentColor" stroke-width="1"/><path d="M8 12.1 5.7 9.4h4.6Z" fill="currentColor" stroke-width="1"/>'), fields: { label: { input: "text" } } },
+  portal: { color: "#0fa3b8", svg: svg('<ellipse cx="8" cy="8" rx="4.6" ry="6.5"/><ellipse cx="8" cy="8" rx="2" ry="3.4"/><path d="M1.5 4.5l1 .6M14.5 11.5l-1-.6"/>'), fields: { label: { input: "text" }, combat: { input: "check" } } },
+  elevator: { color: "#4c4fc9", svg: svg('<rect x="3" y="1.8" width="10" height="12.4" rx="1.6"/><path d="M8 3.9 10.3 6.6H5.7Z" fill="currentColor" stroke-width="1"/><path d="M8 12.1 5.7 9.4h4.6Z" fill="currentColor" stroke-width="1"/>'), fields: { label: { input: "text" }, combat: { input: "check" } } },
   // an NPC: who, when (free text) under the name, what it sells or does
   npc: { color: "#5e7d1f", svg: svg('<circle cx="8" cy="4.8" r="2.6"/><path d="M3 14.5c0-3 2.2-5.2 5-5.2s5 2.2 5 5.2"/>'),
-    fields: { name: { input: "text" }, schedule: { input: "text" }, label: { input: "text", word: "field.npcLabel" } } },
+    fields: { name: { input: "text" }, schedule: { input: "schedule" }, label: { input: "text", word: "field.npcLabel" } } },
 };
 // the map things: one menu in the bar ("Objects"), each kind with its icon, name and one line
 const THINGS = ["rope", "rope2", "lever", "hole", "door", "portal", "elevator", "npc"];
@@ -277,7 +279,7 @@ function whoWhen(m) {
   const lines = [labelOf(m) || t("kind." + m.kind)];
   if (f.label && f.label !== labelOf(m)) lines.push(f.label);
   const out = el("span", {}, lines.join(" · "));
-  if (f.schedule) out.append(el("br"), el("small", { class: "sched" }, "🕑 " + f.schedule));
+  if (f.schedule) out.append(el("br"), el("small", { class: "sched" }, "🕑 " + scheduleText(f.schedule, t)));
   return out;
 }
 
@@ -287,7 +289,7 @@ function icon(m) {
   const cls = "mk" + (BIG[m.kind] ? " " + m.kind : "") + (m.id === selected ? " sel" : "") + (m.locked ? " lock" : "");
   // static glyphs only: no text from the link in this HTML
   return L.divIcon({ className: "", iconSize: [size, size], iconAnchor: [size / 2, size / 2],
-    html: `<div class="${cls}" style="background:${k.color};--ring:${k.color}">${m.locked ? "🔒" : k.svg || k.glyph}</div>` });
+    html: `<div class="${cls}" style="background:${k.color};--ring:${k.color}">${m.locked ? "🔒" : k.svg || k.glyph}${m.fields?.combat ? '<span class="badge cb">⚔</span>' : ""}</div>` });
 }
 
 function rings(cells) {
@@ -450,7 +452,7 @@ function drawMarker(p, m) {
       commit(() => { const n = byId(m.id); if (!n || (n.x === x && n.z === z)) return false; n.x = x; n.z = z; });
     });
     const label = labelOf(m), away = m.dest && m.dest.floor !== m.floor ? leadsText(m.dest.floor) : "";
-    const text = label && away ? `${label} · ${away}` : label || away;
+    const text = [label, away, m.fields?.combat ? "⚔ " + t("combatOn") : ""].filter(Boolean).join(" · ");
     if (m.kind === "boss" || m.kind === "npc") tip(mk, whoWhen(m), BIG[m.kind] ? { offset: [0, -18] } : {});
     else tip(mk, m.kind === "rope2" ? ("↔ " + text).trim() : text);   // a two-way rope: ↔ always
     mk.addTo(p.layer);
@@ -803,6 +805,9 @@ function renderPanel() {
   if (leads(m.kind)) destSection(panel, m, editable);
   for (const [name, f] of Object.entries(k.fields)) {
     panel.append(el("label", {}, fieldWord(m.kind, name)));
+    if (f.input === "schedule") { schedulePicker(panel, m, editable); continue; }
+    if (f.input === "check") { panel.lastChild.remove(); checkField(panel, m, name, editable); continue; }
+    if (f.input === "boss") { bossInput(panel, m, editable); continue; }
     const v = m.fields?.[name] ?? "";
     let input;
     if (f.input === "longtext") input = el("textarea", { maxlength: ML.MAX_TEXT, disabled: !editable });
@@ -828,6 +833,100 @@ function renderPanel() {
   panel.append(el("div", { class: "row" },
     el("button", { type: "button", class: "danger", disabled: !editable && !(STAFF && m.kind in KIND_UI), onclick: deleteSelected }, t("del")),
     el("button", { type: "button", onclick: () => select(null) }, t("close"))));
+}
+
+// a yes/no field (a teleport-like object's combat lock): a checkbox, 1 when ticked, no field when not
+function checkField(panel, m, name, editable) {
+  const box = el("input", { type: "checkbox", disabled: !editable });
+  box.checked = !!m.fields?.[name];
+  box.addEventListener("change", () => commit(() => {
+    const n = byId(m.id);
+    if (box.checked) n.fields[name] = 1; else delete n.fields[name];
+  }));
+  panel.append(el("label", { class: "check", title: t("combatHelp") }, box, "⚔ " + fieldWord(m.kind, name)));
+}
+
+// ---- a boss's or an NPC's schedule: a picker (always / every real hour at a minute / a game-time window), stored as
+// schedule.js's compact code; a free text from an older link shows as "Custom: ..." until the picker replaces it
+const pad2 = (n) => String(n).padStart(2, "0");
+let pickerFor = null;   // the marker whose free-text schedule is being replaced with the picker
+const GAME_DEFAULT = { boss: "g01-04", npc: "g06-18" };   // the game window a click on "Game time" starts from
+
+function setSchedule(id, code) {
+  commit(() => {
+    const n = byId(id);
+    if (!canEdit(n) || (n.fields.schedule ?? "") === code) return false;
+    if (code) n.fields.schedule = code; else delete n.fields.schedule;
+  });
+}
+
+function schedulePicker(panel, m, editable) {
+  const code = m.fields?.schedule ?? "", p = parseSchedule(code);
+  const box = el("div", { class: "sched-pick" });
+  panel.append(box);
+  if (p.mode === "custom" && pickerFor !== m.id) {
+    box.append(el("div", { class: "note" }, t("sched.custom", p.text)));
+    if (editable) box.append(el("div", { class: "row tight" }, el("button", { type: "button", onclick: () => { pickerFor = m.id; renderPanel(); } }, t("sched.usePicker"))));
+    return;
+  }
+  const starts = {
+    always: "",
+    hour: p.mode === "hour" ? code : "h00",
+    game: p.mode === "game" ? code : GAME_DEFAULT[m.kind] || "g06-18",
+  };
+  const seg = el("div", { class: "seg", role: "group", "aria-label": fieldWord(m.kind, "schedule") });
+  for (const mode of ["always", "hour", "game"]) {
+    seg.append(el("button", { type: "button", class: p.mode === mode ? "on" : "", "aria-pressed": String(p.mode === mode), disabled: !editable,
+      onclick: () => setSchedule(m.id, starts[mode]) }, t("sched." + mode)));
+  }
+  box.append(seg);
+  if (p.mode === "hour") {
+    const min = el("input", { type: "number", min: 0, max: 59, step: 1, inputmode: "numeric", disabled: !editable, "aria-label": t("sched.atMinute") });
+    min.value = pad2(p.minute);
+    min.addEventListener("change", () => setSchedule(m.id, scheduleCode({ mode: "hour", minute: min.value })));
+    box.append(el("div", { class: "sched-row" }, el("span", {}, t("sched.atMinute")), min));
+  }
+  if (p.mode === "game") {
+    const hourSelect = (v, word) => {
+      const s = el("select", { disabled: !editable, "aria-label": word });
+      for (let h = 0; h < 24; h++) s.append(el("option", { value: h }, pad2(h) + "h"));
+      s.value = String(v);
+      return s;
+    };
+    const from = hourSelect(p.from, t("sched.from")), to = hourSelect(p.to, t("sched.to"));
+    const pick = () => setSchedule(m.id, scheduleCode({ mode: "game", from: from.value, to: to.value }));
+    from.addEventListener("change", pick);
+    to.addEventListener("change", pick);
+    box.append(el("div", { class: "sched-row" }, el("span", {}, t("sched.from")), from, el("span", {}, t("sched.to")), to));
+    box.append(el("div", { class: "sched-row" },
+      el("button", { type: "button", class: code === "g06-18" ? "on" : "", disabled: !editable, onclick: () => setSchedule(m.id, "g06-18") }, t("sched.day")),
+      el("button", { type: "button", class: code === "g18-06" ? "on" : "", disabled: !editable, onclick: () => setSchedule(m.id, "g18-06") }, t("sched.night"))));
+  }
+  // the live preview: what the label and the change list will say
+  box.append(el("div", { class: "sched-preview" }, "🕑 " + scheduleText(code, t)));
+  if (p.mode === "game") box.append(el("div", { class: "id" }, t("sched.gameHint")));
+}
+
+// a boss's name: the game's bosses as suggestions (bosses.js), or any other name typed freely; a listed boss with one
+// fixed window fills the schedule in (still editable), unless a schedule of another kind was set by hand
+function bossInput(panel, m, editable) {
+  const input = el("input", { type: "text", maxlength: 60, disabled: !editable, list: "bossList", autocomplete: "off", placeholder: t("bossPlaceholder") });
+  input.value = m.fields?.monster ?? "";
+  input.addEventListener("change", () => {
+    const typed = input.value.trim(), known = bossOf(typed);
+    const val = known ? known.name : typed;
+    let filled = null;
+    commit(() => {
+      const n = byId(m.id);
+      const was = n.fields.monster ?? "";
+      if (was === val) return false;
+      if (val) n.fields.monster = val; else delete n.fields.monster;
+      const old = n.fields.schedule ?? "", before = bossOf(was)?.schedule ?? "";
+      if (known?.schedule && (old === "" || old === before)) { n.fields.schedule = known.schedule; filled = known.name; }
+    });
+    if (filled) toast(t("sched.prefilled", filled));
+  });
+  panel.append(input, el("div", { class: "id" }, t("bossHint")));
 }
 
 // a rope's, hole's or portal's destination: set it by a tap, change its floor, show it, remove it
@@ -877,9 +976,10 @@ function changeLines(state) {
     if (m.kind === "spawn") return `${name} ${f.monster || "?"}${f.count ? " ×" + f.count : ""}${f.radius ? " r" + f.radius : ""}`;
     if (m.kind === "boss" || m.kind === "npc") {
       const who = m.kind === "boss" ? f.monster : f.name;
-      return name + (who ? ` "${who}"` : "") + (f.schedule ? ` (🕑 ${f.schedule})` : "") + (f.label ? ` "${f.label}"` : "");
+      return name + (who ? ` "${who}"` : "") + (f.schedule ? ` (🕑 ${scheduleText(f.schedule, t)})` : "") + (f.label ? ` "${f.label}"` : "");
     }
-    const extra = m.cells ? " " + t("cells", m.cells.length) : m.points ? " " + t("points", m.points.length) : "";
+    const extra = (m.cells ? " " + t("cells", m.cells.length) : m.points ? " " + t("points", m.points.length) : "")
+      + (f.combat ? " ⚔ " + t("combatOn") : "");
     const text = f.label || f.text;
     return name + extra + (text ? ` "${text}"` : "");
   };
@@ -901,8 +1001,10 @@ function changeLines(state) {
       else if (!c.to) lines.push(`~ ${id} ${kind} ${t("destRemoved")} (${t("was")} ${spotText(c.from)})`);
       else lines.push(`~ ${id} ${kind} ${t("destMoved")}: ${spotText(c.from)} → ${spotText(c.to)}`);
     } else if (c.op === "edited") {
-      const v = (x) => (x == null ? "∅" : typeof x === "string" ? `"${x}"` : x);
-      lines.push(`~ ${id} ${kind} ${t("edited")}: ${fieldWord(c.kind, c.field)}: ${v(c.old)} → ${v(c.new)}`);
+      // a schedule in words (its compact form is for the link only)
+      const v = (x) => (c.field === "schedule" ? scheduleText(x ?? "", t) : x == null ? "∅" : typeof x === "string" ? `"${x}"` : x);
+      if (c.field === "combat") lines.push(`~ ${id} ${kind}: ⚔ ${t(c.new ? "combatOn" : "combatOff")}`);
+      else lines.push(`~ ${id} ${kind} ${t("edited")}: ${fieldWord(c.kind, c.field)}: ${v(c.old)} → ${v(c.new)}`);
     } else lines.push(`~ ${id} ${kind} ${t(c.op + "Op")}`);
   }
   return lines;
@@ -1037,6 +1139,8 @@ function buildBar() {
   };
   const dl = $("monsterList");
   for (const m of [...MONSTERS].sort()) dl.append(el("option", { value: m }));   // the list itself is append only
+  // the bosses' names for the boss marker (made here, not in index.html: a cached older index.html still works)
+  document.body.append(el("datalist", { id: "bossList" }, BOSSES.map(([name]) => el("option", { value: name }))));
   document.addEventListener("keydown", (e) => {
     if (e.target.closest("input, textarea, select")) return;
     const mod = e.ctrlKey || e.metaKey;
