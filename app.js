@@ -115,6 +115,12 @@ function buildPanes(floors, view) {
     map.on("dblclick", () => { if (tool === "route") finishRoute(); });
     hookPainting(p);
   });
+  // Each map measured its box when it was created, before the later panes split the screen: measure again and
+  // centre every pane on the link's view, or the first pane's centre falls outside what it shows.
+  for (const p of panes) {
+    p.map.invalidateSize({ animate: false });
+    p.map.setView(ll(view.x, view.z), view.zoom, { animate: false });
+  }
   applyTool();
   refresh();
 }
