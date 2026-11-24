@@ -28,20 +28,32 @@ and posts the new link (with its list of changes) back in their ticket.
 
 ## The link
 
-Everything is in the URL `#fragment` (never sent to the server): `#1.` + base64url(raw deflate(payload)), `1` being the
-format version. The format is documented at the top of `maplink.js`. Kinds of markers only get added, never renumbered,
-and markers of a kind a page doesn't know are kept unchanged, so old links keep working.
+Everything is in the URL `#fragment` (never sent to the server): `#2.` + base64url(the payload), `2` being the format
+version. The format is documented at the top of `maplink.js`. Kinds of markers only get added, never renumbered, and
+markers of a kind a page doesn't know are kept unchanged, so old links keep working.
+
+**Format 2** (what Save writes) packs the markers as bits, about half the length of format 1 for the same map:
+- an area is its outlines (a start and the length of each side, holes and islands as more loops), not its rows;
+- a spawn's monster is its place in `monsters.js` (append only), other names stay text;
+- each point is written from the one before it, and a value the same as the previous marker's costs one bit;
+- only the text (labels, notes, the title) is deflated; deflate made the packed bits longer.
+
+**Format 1** links (`#1.`, from before) still open as they were; saving one writes it as format 2.
 
 Map things (rope .. elevator) came later as new kinds, ropes, holes, portals and elevators with an optional destination,
 and a link may end with its own fields (the title); still format 1: a page from before them keeps such a marker
 unchanged and ignores the title.
 
-A made-up example (a locked area "A", a spawn, a point and a note):
+Two made-up format-1 examples, which still open (a locked area "A", a spawn, a point and a note):
 `https://map.opengea.tech/?lang=en#1.Y2QIKGdhZGBhYWFiYGTgZU63YWJiACFGRkegAANvVCMjI0t4fk4aEwcLGyMTAwNHSi4jS0ZqUSoLMwMDv1s3IyNXcUFieZ5CZkpqIgMA`
 
 Another, made up too, with a title: one of each map thing, a rope from the surface to floor -4, a portal back up and an
 elevator to floor 2:
 `https://map.opengea.tech/?lang=en#1.Hci7DoJAEAXQO8AuA_HRWu4XELCwMMbCREJBYWFhO8I2ZnEIEuLnm3jKQ6Ys9kV1uiUR2FprAGwO9ywhSjudenGVJfDq0hBLkEXenaQRENcPcEycnVsyo06zZAl4Xda0ysn-I-QGvG1aCxD74BfpdQLtrl8_jEGPTp8vP-vH9eoGGeUH`
+
+The same two maps saved as format 2:
+`https://map.opengea.tech/?lang=en#2.AgBQdwQBAAQEBAAAnMozMrfEJGMdE0FLZmxS0mN0ZMlILUrlKi5ILM9TyExJTQQA`
+`https://map.opengea.tech/?lang=en#2.AgUwLjIuMTxQBAIACAYGBgAAaDdjcuLBELUQTQOYoLwWKhjqLkrhJug0ImNPzi9KSVQw5EjMSSxLzEtOZC3ILypJZAOTORypOalliSn5RYwSrhWpuQU5-VYK-UlZqSX5xQop-Qq5iQWJAA`
 
 ## Files
 
