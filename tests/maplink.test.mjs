@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { inflateRawSync } from "node:zlib";
 import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, cleanTitle, LinkError, KINDS } from "../maplink.js";
 import { WORDS, LANGS } from "../i18n.js";
+import { nextFloor, tilesInView } from "../floors.js";
 
 const sample = {
   tiles: "0.2.1",
@@ -181,6 +182,21 @@ test("a map's title: carried, cleaned, capped, and only bytes after everything a
   const saved = await decode(await encode(saveState(opened, opened.markers, opened.view, opened.tiles, opened.next, "Novo")));
   assert.equal(saved.title, "Novo");
   assert.deepEqual(changes(saved), []);
+});
+
+test("floor up / down: the next floor with map in view, none past the ends", () => {
+  const floors = ["s", "10", "9", "8", "-1"];
+  const all = ["-1_-1", "0_-1", "-1_0", "0_0"];
+  const tiles = { s: { 0: all }, 10: { 0: all }, 9: { 0: ["5_5"] }, 8: { 0: all }, "-1": { 0: ["0_0"] } };
+  const view = [-100, -100, 100, 100];   // touches the four middle tiles
+  assert.equal(nextFloor(floors, tiles, "s", -1, view), null);           // the surface is the top
+  assert.equal(nextFloor(floors, tiles, "s", 1, view), "10");
+  assert.equal(nextFloor(floors, tiles, "10", 1, view), "8");            // 9 has no map here: skipped
+  assert.equal(nextFloor(floors, tiles, "8", -1, view), "10");
+  assert.equal(nextFloor(floors, tiles, "8", 1, view), "-1");
+  assert.equal(nextFloor(floors, tiles, "8", 1, [-300, -300, -200, -200]), null);   // -1 has no map in that corner
+  assert.equal(nextFloor(floors, tiles, "-1", 1, view), null);           // the bottom
+  assert.deepEqual(tilesInView([10, 10, 300, 20]), ["0_0", "1_0"]);
 });
 
 test("every language has every word", () => {

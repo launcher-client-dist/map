@@ -1,6 +1,7 @@
 // The map page: Leaflet over the game's map tiles, a marker editor, the state in the URL #fragment (maplink.js).
 // Everything a link carries was typed by someone: text goes into the page with textContent only, never as HTML.
 import * as ML from "./maplink.js";
+import * as FL from "./floors.js";
 import { MONSTERS } from "./monsters.js";
 import { LANGS, pickLang, translator } from "./i18n.js";
 
@@ -194,21 +195,11 @@ function setFloor(p, floor) {
 // map tile in the pane's view (blank there), and the view stays where it is.
 let activePane = null;   // the pane the shortcuts move: the last one pointed at
 
-function hasMapInView(p, floor) {
-  const have = new Set(tileMeta.tiles[floor]?.["0"] || []);
-  if (!have.size) return false;
+// dir -1: the floor above, +1: the floor below; null when there is none with map here (the rule: floors.js)
+function nextFloor(p, dir) {
   const b = p.map.getBounds();
   const a = p.map.project(b.getNorthWest(), 0), c = p.map.project(b.getSouthEast(), 0);
-  for (let tx = Math.floor(a.x / 256); tx <= Math.floor(c.x / 256); tx++)
-    for (let ty = Math.floor(a.y / 256); ty <= Math.floor(c.y / 256); ty++) if (have.has(tx + "_" + ty)) return true;
-  return false;
-}
-
-// dir -1: the floor above, +1: the floor below; null when there is none with map here
-function nextFloor(p, dir) {
-  const fl = tileMeta.floors;
-  for (let i = fl.indexOf(p.floor) + dir; i >= 0 && i < fl.length; i += dir) if (hasMapInView(p, fl[i])) return fl[i];
-  return null;
+  return FL.nextFloor(tileMeta.floors, tileMeta.tiles, p.floor, dir, [a.x, a.y, c.x, c.y]);
 }
 
 function stepFloor(p, dir) {
