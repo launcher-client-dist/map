@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inflateRawSync } from "node:zlib";
-import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, cleanTitle, LinkError, KINDS } from "../maplink.js";
+import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, cleanTitle, LinkError, KINDS, FORMAT, outlinesOf, monsterIndex } from "../maplink.js";
+import { MONSTERS } from "../monsters.js";
 import { WORDS, LANGS } from "../i18n.js";
 import { nextFloor, tilesInView } from "../floors.js";
 
@@ -19,8 +20,10 @@ const sample = {
 };
 
 test("round trip keeps every kind", async () => {
-  const s = await decode(await encode(sample));
-  assert.equal(s.format, 1);
+  const frag = await encode(sample);
+  assert.ok(frag.startsWith("2."));   // Save writes format 2
+  const s = await decode(frag);
+  assert.equal(s.format, 2);
   assert.equal(s.tiles, "0.2.1");
   assert.deepEqual(s.view, sample.view);
   assert.equal(s.base, 5);
@@ -91,7 +94,7 @@ test("an unknown kind survives unchanged", async () => {
 });
 
 test("bad links are refused", async () => {
-  for (const bad of ["", "#", "#2.AAAA", "#1.!!!", "#1.AAAA", "#x.abc"]) {
+  for (const bad of ["", "#", "#2.AAAA", "#3.AAAA", "#2.!!!", "#2.Ag", "#1.!!!", "#1.AAAA", "#x.abc"]) {
     await assert.rejects(decode(bad), LinkError, bad);
   }
 });
@@ -118,7 +121,12 @@ test("links from before the map things open exactly as before", async () => {
   assert.deepEqual(await decode(OLD.readme), OLD_README);
   const saved = await decode(OLD.saved);
   assert.deepEqual(changes(saved).map((c) => [c.op, c.id, c.field ?? null]), [["moved", 1, null], ["edited", 2, "label"], ["removed", 3, null]]);
-  for (const frag of Object.values(OLD)) assert.deepEqual(payloadOf(await decode(frag)), inflated(frag));
+  for (const frag of Object.values(OLD)) assert.deepEqual(payloadOf(await decode(frag), 1), inflated(frag));
+  // Save writes them as format 2, the same markers and change list
+  const again = await decode(await encode(saved));
+  assert.equal(again.format, 2);
+  assert.deepEqual(again.markers, saved.markers);
+  assert.deepEqual(changes(again), changes(saved));
 });
 
 const things = {
@@ -209,5 +217,112 @@ test("a typical link stays short", async () => {
   const many = { view: { x: 0, z: 0, zoom: 0, floors: ["s"] }, markers: [] };
   for (let i = 0; i < 20; i++) many.markers.push({ id: i, kind: "spawn", floor: "s", x: 100 + i * 7, z: -50 + i * 3, fields: { monster: "Orc Infantry", count: 4, radius: 5 } });
   const frag = await encode(many);
-  assert.ok(frag.length < 600, "20 spawns: " + frag.length);
+  assert.ok(frag.length < 150, "20 spawns: " + frag.length);
+});
+
+// ------------------------------------------------------------------------------------------------ format 2
+// made-up shapes: a ring (a hole), two islands, one cell, thin lines, cells touching only at a corner, a blob
+const rect = (x0, z0, w, h) => { const c = []; for (let z = z0; z < z0 + h; z++) for (let x = x0; x < x0 + w; x++) c.push([x, z]); return c; };
+const minus = (a, b) => { const k = new Set(b.map((c) => c.join())); return a.filter((c) => !k.has(c.join())); };
+const sorted = (cells) => [...new Map(cells.map((c) => [c.join(), c])).values()].sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+function blob(seed, n) {   // a random 4-connected blob with bays and holes (a small LCG: the same on every run)
+  let s = seed;
+  const rnd = () => ((s = (s * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const cells = new Map([["0,0", [0, 0]]]);
+  while (cells.size < n) {
+    const [x, z] = [...cells.values()][Math.floor(rnd() * cells.size)];
+    const [dx, dz] = [[1, 0], [-1, 0], [0, 1], [0, -1]][Math.floor(rnd() * 4)];
+    cells.set(x + dx + "," + (z + dz), [x + dx, z + dz]);
+  }
+  return [...cells.values()].filter(() => rnd() > 0.08);   // some holes
+}
+const SHAPES = {
+  ring: minus(rect(0, 0, 9, 7), rect(3, 2, 3, 3)),
+  ringWithIsland: [...minus(rect(-20, 40, 12, 12), rect(-17, 43, 6, 6)), [-14, 46]],
+  islands: [...rect(0, 0, 3, 3), ...rect(10, -5, 2, 6)],
+  oneCell: [[-300, 250]],
+  row: rect(5, 5, 40, 1),
+  column: rect(5, 5, 1, 40),
+  diagonal: Array.from({ length: 12 }, (_, i) => [i, i]),
+  pinch: [[0, 0], [1, 1], [1, 0], [2, 2], [3, 1]],
+  checker: rect(0, 0, 8, 8).filter(([x, z]) => (x + z) % 2 === 0),
+  blob: blob(7, 900),
+  bigBlob: blob(11, 3000),
+};
+
+test("format 2 areas: every shape comes back cell for cell, outlines where they are shorter", async () => {
+  for (const [name, cells] of Object.entries(SHAPES)) {
+    const state = { view: { x: 3, z: -2, floors: ["s"] }, markers: [{ id: 0, kind: "area", floor: "-4", locked: false, cells, fields: { label: name } }] };
+    const back = await decode(await encode(state));
+    assert.deepEqual(back.markers[0].cells, sorted(cells), name);
+    const loops = outlinesOf(runsOf(cells));
+    assert.ok(loops, name + ": outlines give the cells back");
+  }
+  assert.equal(outlinesOf(runsOf(SHAPES.ring)).length, 2);            // outside and the hole
+  assert.equal(outlinesOf(runsOf(SHAPES.ringWithIsland)).length, 3);  // and the island in it
+  assert.equal(outlinesOf(runsOf(SHAPES.pinch)).length, 1);           // walked through the corner-touching cells
+  // a blob's outlines are far shorter than its rows (holes and all)
+  const area = (cells) => ({ view: { floors: ["s"] }, markers: [{ id: 0, kind: "area", floor: "s", cells, fields: {} }] });
+  const v2 = payloadOf(area(SHAPES.bigBlob)).length, v1 = payloadOf(area(SHAPES.bigBlob), 1).length;
+  assert.ok(v2 < v1 * 0.6, v2 + " vs " + v1);
+});
+
+test("format 2 spawns: a listed monster is its index, another name is text, a newer page's index comes back", async () => {
+  const spawn = (id, monster) => ({ id, kind: "spawn", floor: "s", locked: false, x: id, z: 0, fields: { monster, count: 2, radius: 3 } });
+  const state = { view: { floors: ["s"] }, markers: [spawn(0, "Wolf"), spawn(1, "Wolf"), spawn(2, "Bear"), spawn(3, "Battle Dummy"), spawn(4, "#500"), spawn(5, "#3")] };
+  const back = await decode(await encode(state));
+  assert.deepEqual(back.markers, state.markers);
+  const text = new TextDecoder().decode(payloadOf(state));
+  assert.ok(!text.includes("Wolf") && !text.includes("Bear") && text.includes("Battle Dummy") && text.includes("#3"));
+  assert.equal(monsterIndex("#500"), 500);
+  assert.equal(monsterIndex("#3"), -1);   // a typed "#3" stays text: 3 is a listed monster here
+  // the list only grows: today's names keep their places
+  assert.deepEqual(MONSTERS.slice(0, 4), ["Amphitere", "Ancient Snake", "Bandit", "Banshee"]);
+  assert.equal(MONSTERS.indexOf("Wolf"), 77);
+  assert.equal(MONSTERS.indexOf("Young Amphitere"), 78);
+});
+
+test("format 2: a short link can't declare a huge area, and bad bits are refused", async () => {
+  // one loop, sides 2^20 long: 2^40 cells in a few bytes
+  const head = [2, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0];   // version, tiles "", view 0 0 0, 1 pane s, base 1, next 1, 1 marker, 0 was, flags 0
+  const bits = [];
+  const put = (v, k) => { for (let i = 0; i < k; i++) bits.push(Math.floor(v / 2 ** i) % 2); };
+  const gamma = (v) => { let k = 0; while (2 ** (k + 1) <= v) k++; put(0, k); bits.push(1); put(v - 2 ** k, k); };
+  bits.push(0); gamma(3);      // kind area
+  gamma(1);                    // id 0
+  bits.push(0); gamma(1);      // floor s, unlocked
+  bits.push(1); gamma(2);      // outlines, 1 loop
+  gamma(1); put(0, 3); gamma(1); put(0, 3);   // its first corner at 0, 0 (two z_3(0))
+  gamma(1);                    // 4 corners
+  bits.push(0); gamma(2 ** 20);   // east 2^20
+  bits.push(0); gamma(2 ** 20);   // north 2^20
+  const bytes = [...head];
+  for (let i = 0; i < bits.length; i += 8) bytes.push(bits.slice(i, i + 8).reduce((a, b, j) => a + b * 2 ** j, 0));
+  const frag = "2." + Buffer.from(bytes).toString("base64url");
+  await assert.rejects(decode(frag), /too large/);
+  // a link flag this page doesn't know: a newer format
+  const flagged = Buffer.from([2, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 2]).toString("base64url");
+  await assert.rejects(decode("2." + flagged), /newer/);
+});
+
+test("format 2 is frozen: the README's format-2 example opens as its format-1 twin", async () => {
+  const v2 = "2.AgBQdwQBAAQEBAAAnMozMrfEJGMdE0FLZmxS0mN0ZMlILUrlKi5ILM9TyExJTQQA";
+  const s = await decode(v2);
+  assert.deepEqual({ ...s, format: 1 }, OLD_README);
+  const head = Buffer.from(v2.slice(2), "base64url");
+  assert.deepEqual([...payloadOf(s).slice(0, 15)], [...head.slice(0, 15)]);   // the head: written the same today
+});
+
+test("format 2 keeps a later kind's marker as bytes, and a lever, a note and a route as they were", async () => {
+  const s = { view: { x: 50, z: 50, floors: ["s"] }, title: "Mapa", markers: [
+    { id: 0, kind: "route", floor: "s", locked: false, points: [[50, 50], [60, 55], [61, 80]], fields: { label: "caminho" } },
+    { id: 2, kind: "lever", floor: "-3", locked: true, x: 40, z: 45, fields: {} },
+    { id: 7, kind: "unknown12", code: 12, floor: "s", locked: false, raw: btoa("\x04\x06abc") },
+    { id: 8, kind: "note", floor: "-3", locked: true, x: 0, z: -900, fields: { text: "olá 你好" } },
+  ], was: [{ id: 1, kind: "area", floor: "s", locked: false, cells: [], fields: {} }] };
+  const back = await decode(await encode(s));
+  assert.deepEqual(back.markers, s.markers);
+  assert.deepEqual(back.was, s.was);
+  assert.equal(back.title, "Mapa");
+  assert.equal(FORMAT, 2);
 });

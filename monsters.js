@@ -1,4 +1,6 @@
-// Monster names for spawn markers: names only, as players see them in the game. Add a name here to offer it.
+// Monster names for spawn markers: names only, as players see them in the game. A link writes a spawn's monster as its
+// index here, so this list is append only: add a new name at the END, never sort, remove or rename one (the page shows
+// them sorted). The staff tools keep the same list (their cross test compares them).
 export const MONSTERS = [
   "Amphitere", "Ancient Snake", "Bandit", "Banshee", "Bear", "Black Lamb", "Black Sheep", "Bone Eater", "Cave Spider",
   "Cave Troll", "Chained War", "Conquest Champion", "Conquest Crow", "Conquest Fowler", "Conquest Priestess",

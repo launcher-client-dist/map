@@ -987,7 +987,7 @@ function buildBar() {
     buildPanes(floors, view);
   };
   const dl = $("monsterList");
-  for (const m of MONSTERS) dl.append(el("option", { value: m }));
+  for (const m of [...MONSTERS].sort()) dl.append(el("option", { value: m }));   // the list itself is append only
   document.addEventListener("keydown", (e) => {
     if (e.target.closest("input, textarea, select")) return;
     const mod = e.ctrlKey || e.metaKey;
