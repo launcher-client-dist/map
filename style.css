@@ -25,12 +25,39 @@ button.danger { color: #fff; background: var(--danger); border-color: var(--dang
 #tools, #subtools, #actions, #settings { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 #tools { overflow-x: auto; flex-wrap: nowrap; max-width: 100%; }
 #settings { margin-left: auto; }
+#mapTitle { flex: 1 1 160px; min-width: 120px; max-width: 320px; font-weight: 600; background: #1b2029; }
+#mapTitle:placeholder-shown { font-weight: 400; }
 #settings label { color: var(--muted); display: flex; gap: 6px; align-items: center; }
 .tool .glyph { display: inline-block; width: 1.2em; text-align: center; }
 #banner { padding: 8px 12px; background: #2a2412; color: #f5d68a; border-bottom: 1px solid var(--line); }
 #banner.error { background: #2d1416; color: #ffb4b6; }
 #banner button { margin-left: 8px; min-height: 28px; padding: 2px 10px; }
-#panesBox { flex: 1; display: flex; min-height: 0; }
+#panesBox { flex: 1; display: flex; min-height: 0; position: relative; }
+/* arrows of ropes, holes and portals across panes: drawn over the maps, never catching a tap */
+#links { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; z-index: 900; }
+.map { isolation: isolate; }
+.map.picking, .map.picking .leaflet-interactive { cursor: crosshair; }
+.tool .glyph svg { display: inline-block; vertical-align: -2px; }
+.tool.icon .txt { display: none; }
+.tool.icon { font-weight: 700; min-width: 36px; }
+.tool .glyph.mk { display: inline-flex; vertical-align: middle; width: 20px; height: 20px; }
+.tool .caret { margin-left: 4px; font-size: 11px; opacity: .8; }
+/* the map things' menu, under its button */
+#thingsMenu { position: fixed; z-index: 1500; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+              padding: 6px; box-shadow: 0 8px 30px rgba(0, 0, 0, .55); display: grid; gap: 2px; }
+#thingsMenu[hidden] { display: none; }
+#thingsMenu button { display: flex; gap: 10px; align-items: center; text-align: left; white-space: normal; border: 0;
+                     background: transparent; padding: 8px; min-height: 44px; }
+#thingsMenu button:hover, #thingsMenu button:focus-visible { background: #222833; }
+#thingsMenu button.on { background: #1d2a44; }
+#thingsMenu .mk { flex: none; }
+#thingsMenu div { display: flex; flex-direction: column; }
+#thingsMenu span { color: var(--muted); font-size: 12.5px; }
+/* floor up / down on each pane */
+.pane-head { display: flex; gap: 4px; align-items: center; }
+.pane-head select { flex: 1; min-width: 0; }
+.pane-head .fnav { min-height: 30px; padding: 2px 10px; font-size: 12px; }
+#subtools .pick { display: flex; align-items: center; gap: 6px; padding: 0 4px; }
 .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; border-left: 1px solid var(--line); }
 .pane:first-child { border-left: 0; }
 .pane-head { padding: 4px 6px; background: var(--panel); border-bottom: 1px solid var(--line); }
@@ -78,6 +105,22 @@ dialog .warn { color: #f5d68a; }
 .mk { display: flex; align-items: center; justify-content: center; border-radius: 50%; color: #fff; font-size: 14px;
       border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, .6); width: 26px; height: 26px; }
 .mk.sel { outline: 3px solid #ffe066; outline-offset: 1px; }
+.mk svg { display: block; width: 17px; height: 17px; }
+.mk.end { width: 20px; height: 20px; border-width: 2px; }
+.mk.end svg, .mk.mini svg { width: 12px; height: 12px; }
+.mk.mini { display: inline-flex; flex: none; width: 20px; height: 20px; border-width: 1.5px; font-size: 11px; }
+.mk.head { flex: none; width: 24px; height: 24px; font-size: 12px; }
+.chev { width: 16px; height: 16px; filter: drop-shadow(0 0 1.5px #000); }
+.chev svg { width: 16px; height: 16px; display: block; }
+#panel .dest { display: flex; gap: 8px; align-items: center; font-variant-numeric: tabular-nums; }
+#panel .row.tight { margin-top: 6px; }
+ul.legend { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+ul.legend li { display: flex; gap: 10px; align-items: center; }
+ul.legend li .mk { flex: none; }
+ul.legend li div { display: flex; flex-direction: column; }
+ul.legend li span { color: var(--muted); font-size: 13px; }
+.leaflet-tooltip.lbl.end { font-size: 11px; }
 .mk.lock { border-style: dashed; }
 .mk .badge { position: absolute; right: -8px; top: -8px; background: #000; color: #fff; border-radius: 9px;
              font-size: 11px; padding: 0 4px; line-height: 16px; border: 1px solid #fff; }
