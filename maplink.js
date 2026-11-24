@@ -53,7 +53,8 @@
 // floor code: 0 the surface, else zigzag(slice) + 1.
 // In memory a pointdest marker is a point with an optional dest: {x, z, floor} (absolute; no key when there is none).
 // The kinds from code 5 on (rope .. elevator) came after the first pages: a page from before them keeps such a marker
-// as raw bytes (an unknown kind), so the format version stayed 1.
+// as raw bytes (an unknown kind), so the format version stayed 1. The same for rope2 (a two-way rope), boss and npc
+// (codes 11..13, format 2's length + format-1 body path): a page from before them keeps them as they are.
 
 import { MONSTERS } from "./monsters.js";
 
@@ -92,6 +93,10 @@ export const KINDS = [
   { name: "door", geometry: "point", fields: [["label", "str"]] },
   { name: "portal", geometry: "pointdest", fields: [["label", "str"]] },
   { name: "elevator", geometry: "pointdest", fields: [["label", "str"]] },
+  // from CORE_KINDS on: each one a length and a format-1 body (a page from before keeps it as raw bytes)
+  { name: "rope2", geometry: "pointdest", fields: [["label", "str"]] },   // a two-way rope: goes and comes back
+  { name: "boss", geometry: "point", fields: [["monster", "str"], ["schedule", "str"], ["label", "str"]] },
+  { name: "npc", geometry: "point", fields: [["name", "str"], ["schedule", "str"], ["label", "str"]] },
 ];
 export const KIND_CODE = Object.fromEntries(KINDS.map((k, i) => [k.name, i]));
 
@@ -855,8 +860,9 @@ function geometryKey(m) {
 
 const destKey = (m) => (m.dest ? m.dest.x + "," + m.dest.z + "," + m.dest.floor : "");
 
-// [{op: added|moved|dest|edited|locked|unlocked|removed, id, kind, ...}] in id order (Python's maplink.changes)
-// moved: the marker itself (its geometry or floor); dest: its destination {x, z, floor} from -> to (null: none)
+// [{op: added|kind|moved|dest|edited|locked|unlocked|removed, id, kind, ...}] in id order (Python's maplink.changes)
+// kind: the marker became another kind (a rope made two-way and back), from -> to; moved: the marker itself (its
+// geometry or floor); dest: its destination {x, z, floor} from -> to (null: none)
 export function changes(state) {
   const base = state.base || 0;
   const was = new Map((state.was || []).map((m) => [m.id, m]));
@@ -868,6 +874,7 @@ export function changes(state) {
     if (b && !a) { if (id >= base) out.push({ op: "added", id, kind: b.kind, marker: b }); continue; }
     if (!b) { out.push({ op: "removed", id, kind: a.kind, marker: a }); continue; }
     if (same(a, b)) continue;
+    if (a.kind !== b.kind) out.push({ op: "kind", id, kind: b.kind, from: a.kind, to: b.kind });
     if (geometryKey(a) !== geometryKey(b) || a.floor !== b.floor) {
       const c = { op: "moved", id, kind: b.kind, from: where(a), to: where(b), floor_from: a.floor, floor_to: b.floor };
       for (const key of ["cells", "points"]) {

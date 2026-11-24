@@ -122,6 +122,10 @@ ul.legend li div { display: flex; flex-direction: column; }
 ul.legend li span { color: var(--muted); font-size: 13px; }
 .leaflet-tooltip.lbl.end { font-size: 11px; }
 .mk.lock { border-style: dashed; }
+/* a boss: a bigger disc with a ring in its colour */
+.mk.boss { width: 34px; height: 34px; box-shadow: 0 0 0 2px #fff, 0 0 0 5px var(--ring), 0 1px 7px 5px rgba(0, 0, 0, .55); }
+.mk.boss svg { width: 20px; height: 20px; }
+.leaflet-tooltip.lbl .sched { font-size: 11px; opacity: .9; }
 .mk .badge { position: absolute; right: -8px; top: -8px; background: #000; color: #fff; border-radius: 9px;
              font-size: 11px; padding: 0 4px; line-height: 16px; border: 1px solid #fff; }
 .handle { width: 16px; height: 16px; border-radius: 50%; background: #ffe066; border: 2px solid #000; }

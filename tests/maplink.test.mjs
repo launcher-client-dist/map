@@ -1,8 +1,8 @@
 // node --test tests/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { inflateRawSync } from "node:zlib";
-import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, cleanTitle, LinkError, KINDS, FORMAT, outlinesOf, monsterIndex } from "../maplink.js";
+import { inflateRawSync, deflateRawSync } from "node:zlib";
+import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, cleanTitle, LinkError, KINDS, CORE_KINDS, FORMAT, outlinesOf, monsterIndex } from "../maplink.js";
 import { MONSTERS } from "../monsters.js";
 import { WORDS, LANGS } from "../i18n.js";
 import { nextFloor, tilesInView } from "../floors.js";
@@ -145,7 +145,7 @@ test("map things round trip, with and without a destination", async () => {
   const s = await decode(await encode(things));
   assert.deepEqual(s.markers, things.markers);
   assert.ok(!("dest" in s.markers[2]));
-  assert.deepEqual(KINDS.slice(5).map((k) => k.name), ["rope", "lever", "hole", "door", "portal", "elevator"]);
+  assert.deepEqual(KINDS.slice(5).map((k) => k.name), ["rope", "lever", "hole", "door", "portal", "elevator", "rope2", "boss", "npc"]);
   assert.deepEqual(KINDS.slice(0, 5).map((k) => k.name), ["spawn", "poi", "area", "route", "note"]);   // never reordered
   // an elevator leads to another floor like a rope
   const lift = { view: { floors: ["s"] }, markers: [{ id: 0, kind: "elevator", floor: "-2", locked: false, x: 4, z: 4, dest: { x: 4, z: 4, floor: "3" }, fields: { label: "elevador" } }] };
@@ -317,7 +317,7 @@ test("format 2 keeps a later kind's marker as bytes, and a lever, a note and a r
   const s = { view: { x: 50, z: 50, floors: ["s"] }, title: "Mapa", markers: [
     { id: 0, kind: "route", floor: "s", locked: false, points: [[50, 50], [60, 55], [61, 80]], fields: { label: "caminho" } },
     { id: 2, kind: "lever", floor: "-3", locked: true, x: 40, z: 45, fields: {} },
-    { id: 7, kind: "unknown12", code: 12, floor: "s", locked: false, raw: btoa("\x04\x06abc") },
+    { id: 7, kind: "unknown20", code: 20, floor: "s", locked: false, raw: btoa("\x04\x06abc") },
     { id: 8, kind: "note", floor: "-3", locked: true, x: 0, z: -900, fields: { text: "olá 你好" } },
   ], was: [{ id: 1, kind: "area", floor: "s", locked: false, cells: [], fields: {} }] };
   const back = await decode(await encode(s));
@@ -325,4 +325,35 @@ test("format 2 keeps a later kind's marker as bytes, and a lever, a note and a r
   assert.deepEqual(back.was, s.was);
   assert.equal(back.title, "Mapa");
   assert.equal(FORMAT, 2);
+});
+
+// ------------------------------------------------------------------------------------------------ rope2, boss, npc
+const later = {
+  tiles: "0.2.1",
+  view: { x: 10, z: 20, zoom: 2, floors: ["s", "-4"] },
+  markers: [
+    { id: 0, kind: "rope2", floor: "s", locked: false, x: 11, z: 22, dest: { x: 13, z: 21, floor: "-4" }, fields: { label: "corda dupla" } },
+    { id: 1, kind: "rope", floor: "s", locked: false, x: 30, z: 30, dest: { x: 30, z: 31, floor: "s" }, fields: {} },
+    { id: 2, kind: "boss", floor: "s", locked: true, x: -40, z: 55, fields: { monster: "Rubellus", schedule: "toda hora no :05", label: "chefe" } },
+    { id: 3, kind: "npc", floor: "-4", locked: false, x: 7, z: -8, fields: { name: "Gavin", schedule: "noite (01h-04h do jogo)", label: "vende cordas" } },
+    { id: 4, kind: "rope2", floor: "-4", locked: false, x: 2, z: 2, fields: {} },
+  ],
+};
+
+test("a two-way rope, a boss and an NPC: kinds 11..13, round trip in both formats", async () => {
+  assert.deepEqual(KINDS.slice(CORE_KINDS).map((k) => k.name), ["rope2", "boss", "npc"]);
+  assert.deepEqual((await decode(await encode(later))).markers, later.markers);
+  const v1 = "1." + Buffer.from(deflateRawSync(payloadOf(later, 1))).toString("base64url");
+  assert.deepEqual((await decode(v1)).markers, later.markers);
+});
+
+test("a rope made two-way (or one-way) is its own change", async () => {
+  const opened = await decode(await encode(later));
+  const m = structuredClone(opened.markers);
+  m[0].kind = "rope";
+  m[1].kind = "rope2";
+  m[1].x += 1;
+  const saved = await decode(await encode(saveState(opened, m, opened.view, opened.tiles, 5)));
+  assert.deepEqual(changes(saved).map((c) => [c.op, c.id, c.from?.toString() ?? null]),
+    [["kind", 0, "rope2"], ["kind", 1, "rope"], ["moved", 1, "30,30"]]);
 });

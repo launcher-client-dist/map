@@ -17,21 +17,33 @@ document.title = t("title");
 const svg = (body) => `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const KIND_UI = {
   spawn: { color: "#e5484d", glyph: "⚔", fields: { monster: { input: "monster" }, count: { input: "int", min: 1, max: 99, def: 1 }, radius: { input: "int", min: 0, max: 40, def: 3 } } },
+  // a boss: like a spawn, with when it comes (free text) under its name; a crown, a bigger disc with a ring
+  boss: { color: "#8e1b3b", svg: svg('<path d="M2.5 13.5h11"/><path d="M3.2 11 2 4.6l3.4 2.9L8 2.8l2.6 4.7L14 4.6 12.8 11Z"/>'),
+    fields: { monster: { input: "monster" }, schedule: { input: "text" }, label: { input: "text", word: "field.bossLabel" } } },
   poi: { color: "#f5a524", glyph: "★", fields: { label: { input: "text" } } },
   area: { color: "#30a46c", glyph: "▦", fields: { label: { input: "text" } } },
   route: { color: "#3e8ef7", glyph: "➜", fields: { label: { input: "text" } } },
   note: { color: "#a46cf5", glyph: "✎", fields: { text: { input: "longtext" } } },
   // map things (ropes, holes and portals lead somewhere: maplink.js's pointdest geometry)
   rope: { color: "#a86f3c", svg: svg('<path d="M8 1.5v2"/><circle cx="8" cy="5" r="1.5"/><path d="M8 6.5c-2.2 1.1-2.2 2.9 0 4s2.2 2.9 0 4"/>'), fields: { label: { input: "text" } } },
+  // a two-way rope (goes and comes back): the rope with an arrow up and one down; its line has a head at both ends
+  rope2: { color: "#a86f3c", svg: svg('<path d="M8 1.5v2"/><circle cx="8" cy="5" r="1.5"/><path d="M8 6.5c-2.2 1.1-2.2 2.9 0 4s2.2 2.9 0 4"/><path d="M3 8V2.2M1.4 3.8 3 2.2l1.6 1.6M13 8v5.8M11.4 12.2 13 13.8l1.6-1.6" stroke-width="1.4"/>'), fields: { label: { input: "text" } } },
   lever: { color: "#d6409f", svg: svg('<path d="M2.5 13.5h11"/><path d="M5 13.5a3 3 0 0 1 6 0"/><path d="M8 11 11.2 4.2"/><circle cx="11.6" cy="3.4" r="1.6" fill="currentColor"/>'), fields: { label: { input: "text" } } },
   hole: { color: "#26292e", svg: svg('<path d="M8 1.5v4M6 3.8l2 2 2-2"/><ellipse cx="8" cy="10.5" rx="6" ry="3.5"/><ellipse cx="8" cy="11" rx="3.3" ry="1.7" fill="currentColor"/>'), fields: { label: { input: "text" } } },
   door: { color: "#5b6b82", svg: svg('<path d="M4 14.5V3.5A1.5 1.5 0 0 1 5.5 2h5A1.5 1.5 0 0 1 12 3.5v11"/><path d="M2.5 14.5h11"/><circle cx="10" cy="8.8" r=".8" fill="currentColor"/>'), fields: { label: { input: "text" } } },
   portal: { color: "#0fa3b8", svg: svg('<ellipse cx="8" cy="8" rx="4.6" ry="6.5"/><ellipse cx="8" cy="8" rx="2" ry="3.4"/><path d="M1.5 4.5l1 .6M14.5 11.5l-1-.6"/>'), fields: { label: { input: "text" } } },
   elevator: { color: "#4c4fc9", svg: svg('<rect x="3" y="1.8" width="10" height="12.4" rx="1.6"/><path d="M8 3.9 10.3 6.6H5.7Z" fill="currentColor" stroke-width="1"/><path d="M8 12.1 5.7 9.4h4.6Z" fill="currentColor" stroke-width="1"/>'), fields: { label: { input: "text" } } },
+  // an NPC: who, when (free text) under the name, what it sells or does
+  npc: { color: "#5e7d1f", svg: svg('<circle cx="8" cy="4.8" r="2.6"/><path d="M3 14.5c0-3 2.2-5.2 5-5.2s5 2.2 5 5.2"/>'),
+    fields: { name: { input: "text" }, schedule: { input: "text" }, label: { input: "text", word: "field.npcLabel" } } },
 };
 // the map things: one menu in the bar ("Objects"), each kind with its icon, name and one line
-const THINGS = ["rope", "lever", "hole", "door", "portal", "elevator"];
-const TOOLS = ["select", "spawn", "poi", "area", "route", "note", "things", "legend"];
+const THINGS = ["rope", "rope2", "lever", "hole", "door", "portal", "elevator", "npc"];
+const TOOLS = ["select", "spawn", "boss", "poi", "area", "route", "note", "things", "legend"];
+// a field's word in the panel and the change list: its own (a boss's or an NPC's label) or the field's
+const fieldWord = (kind, name) => t(KIND_UI[kind]?.fields?.[name]?.word || "field." + name);
+// a two-way rope: an arrow both ways
+const arrowOf = (m) => (m.kind === "rope2" ? "↔" : "→");
 const GLYPH = { select: "☝", legend: "?", things: "＋", ...Object.fromEntries(Object.entries(KIND_UI).map(([k, v]) => [k, v.glyph])) };
 const UNKNOWN = { color: "#888", glyph: "?", fields: {} };
 const ui = (m) => KIND_UI[m.kind] || UNKNOWN;
@@ -247,22 +259,35 @@ function showCoords(p, latlng) {
 // ------------------------------------------------------------------------------------------------ drawing
 function tip(layer, text, opts = {}) {
   if (!text) return;
-  const span = el("span", {}, text);   // text node: whatever the link holds stays text
+  const span = text instanceof Node ? text : el("span", {}, text);   // text nodes: whatever the link holds stays text
   layer.bindTooltip(span, { permanent: true, direction: "top", className: "lbl", offset: [0, -14], ...opts });
 }
 
 function labelOf(m) {
   const f = m.fields || {};
   if (m.kind === "spawn") return [f.monster || "?", f.count > 1 ? "×" + f.count : ""].join(" ").trim();
+  if (m.kind === "boss") return f.monster || "?";
+  if (m.kind === "npc") return f.name || f.label || "";
   return f.label || f.text || "";
 }
 
+// a boss's or an NPC's label on the map: its name, its own label, and when it is there on a line under them
+function whoWhen(m) {
+  const f = m.fields || {};
+  const lines = [labelOf(m) || t("kind." + m.kind)];
+  if (f.label && f.label !== labelOf(m)) lines.push(f.label);
+  const out = el("span", {}, lines.join(" · "));
+  if (f.schedule) out.append(el("br"), el("small", { class: "sched" }, "🕑 " + f.schedule));
+  return out;
+}
+
+const BIG = { boss: 34 };   // a boss: a bigger disc with a ring
 function icon(m) {
-  const k = ui(m);
-  const cls = "mk" + (m.id === selected ? " sel" : "") + (m.locked ? " lock" : "");
+  const k = ui(m), size = BIG[m.kind] || 26;
+  const cls = "mk" + (BIG[m.kind] ? " " + m.kind : "") + (m.id === selected ? " sel" : "") + (m.locked ? " lock" : "");
   // static glyphs only: no text from the link in this HTML
-  return L.divIcon({ className: "", iconSize: [26, 26], iconAnchor: [13, 13],
-    html: `<div class="${cls}" style="background:${k.color}">${m.locked ? "🔒" : k.svg || k.glyph}</div>` });
+  return L.divIcon({ className: "", iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+    html: `<div class="${cls}" style="background:${k.color};--ring:${k.color}">${m.locked ? "🔒" : k.svg || k.glyph}</div>` });
 }
 
 function rings(cells) {
@@ -288,7 +313,7 @@ const canEdit = (m) => m && !m.locked && m.kind in KIND_UI;
 // marker on the destination's floor, and, when both floors are shown side by side, an arrow across the panes (drawLinks).
 function destLabel(m) {
   const name = KIND_UI[m.kind] ? t("kind." + m.kind) : m.kind;
-  return t("destOf", labelOf(m) ? `${name} "${labelOf(m)}"` : `${name} #${m.id}`);
+  return (m.kind === "rope2" ? "↔ " : "") + t("destOf", labelOf(m) ? `${name} "${labelOf(m)}"` : `${name} #${m.id}`);
 }
 
 function setDest(id, x, z, floor) {
@@ -315,11 +340,14 @@ function drawDest(p, m) {
     const line = [ll(m.x, m.z), ll(d.x, d.z)];
     L.polyline(line, { color: "#000", weight: sel ? 6 : 5, opacity: 0.35, interactive: false }).addTo(p.layer);
     L.polyline(line, { color: sel ? "#ffe066" : k.color, weight: sel ? 3.5 : 2.5, dashArray: "7 5", interactive: false }).addTo(p.layer);
-    // a chevron at the middle, pointing to the destination (+z is up on the screen)
+    // a chevron at the middle, pointing to the destination (+z is up on the screen); a two-way rope: one at each end,
+    // pointing out, just clear of the end markers (offsets in pixels: the same at every zoom)
     const deg = (Math.atan2(-(d.z - m.z), d.x - m.x) * 180) / Math.PI;
-    L.marker(ll((m.x + d.x) / 2, (m.z + d.z) / 2), { interactive: false, keyboard: false,
+    const chev = (x, z, angle, back) => L.marker(ll(x, z), { interactive: false, keyboard: false,
       icon: L.divIcon({ className: "", iconSize: [16, 16], iconAnchor: [8, 8],
-        html: `<div class="chev" style="transform:rotate(${deg.toFixed(1)}deg);color:${sel ? "#ffe066" : k.color}">${svg('<path d="M5 3l6 5-6 5" stroke-width="2.6"/>')}</div>` }) }).addTo(p.layer);
+        html: `<div class="chev" style="transform:rotate(${angle.toFixed(1)}deg) translateX(${-back}px);color:${sel ? "#ffe066" : k.color}">${svg('<path d="M5 3l6 5-6 5" stroke-width="2.6"/>')}</div>` }) }).addTo(p.layer);
+    if (m.kind === "rope2") { chev(d.x, d.z, deg, 18); chev(m.x, m.z, deg + 180, 21); }
+    else chev((m.x + d.x) / 2, (m.z + d.z) / 2, deg, 0);
   }
   if (d.floor !== p.floor) return;
   // the end marker: the kind's icon, smaller; drag it to move the destination, tap it to select its rope
@@ -384,15 +412,19 @@ function drawLinks() {
     const sel = m.id === selected, color = sel ? "#ffe066" : ui(m).color;
     const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
     if (len < 30) continue;
-    // stop short of the end marker; an arrow head there
+    // stop short of the end marker; an arrow head there (a two-way rope: at the start too)
     const ux = (b[0] - a[0]) / len, uy = (b[1] - a[1]) / len;
     const s = [a[0] + ux * 14, a[1] + uy * 14], e = [b[0] - ux * 12, b[1] - uy * 12];
     const line = `M${s[0].toFixed(1)} ${s[1].toFixed(1)}L${e[0].toFixed(1)} ${e[1].toFixed(1)}`;
     add("path", { d: line, stroke: "#000", "stroke-width": sel ? 6 : 5, "stroke-opacity": 0.35, fill: "none" });
     add("path", { d: line, stroke: color, "stroke-width": sel ? 3.5 : 2.5, "stroke-dasharray": "7 5", fill: "none", opacity: sel ? 1 : 0.85 });
     const h = 9, w = 5;
-    const tip = [e[0], e[1]], l = [e[0] - ux * h - uy * w, e[1] - uy * h + ux * w], r = [e[0] - ux * h + uy * w, e[1] - uy * h - ux * w];
-    add("path", { d: `M${tip.join(" ")}L${l.join(" ")}L${r.join(" ")}Z`, fill: color, stroke: "#000", "stroke-opacity": 0.4 });
+    const head = (p, vx, vy) => {   // a head at p pointing along (vx, vy)
+      const l = [p[0] - vx * h - vy * w, p[1] - vy * h + vx * w], r = [p[0] - vx * h + vy * w, p[1] - vy * h - vx * w];
+      add("path", { d: `M${p.join(" ")}L${l.join(" ")}L${r.join(" ")}Z`, fill: color, stroke: "#000", "stroke-opacity": 0.4 });
+    };
+    head(e, ux, uy);
+    if (m.kind === "rope2") head(s, -ux, -uy);
   }
 }
 
@@ -418,7 +450,9 @@ function drawMarker(p, m) {
       commit(() => { const n = byId(m.id); if (!n || (n.x === x && n.z === z)) return false; n.x = x; n.z = z; });
     });
     const label = labelOf(m), away = m.dest && m.dest.floor !== m.floor ? leadsText(m.dest.floor) : "";
-    tip(mk, label && away ? `${label} · ${away}` : label || away);
+    const text = label && away ? `${label} · ${away}` : label || away;
+    if (m.kind === "boss" || m.kind === "npc") tip(mk, whoWhen(m), BIG[m.kind] ? { offset: [0, -18] } : {});
+    else tip(mk, m.kind === "rope2" ? ("↔ " + text).trim() : text);   // a two-way rope: ↔ always
     mk.addTo(p.layer);
     return;
   }
@@ -759,9 +793,16 @@ function renderPanel() {
   fs.value = m.floor;
   fs.addEventListener("change", () => commit(() => { byId(m.id).floor = fs.value; }));
   panel.append(fs);
+  // a rope made two-way (goes and comes back) and back: the same marker, its kind swapped
+  if (m.kind === "rope" || m.kind === "rope2") {
+    const two = el("input", { type: "checkbox", disabled: !editable });
+    two.checked = m.kind === "rope2";
+    two.addEventListener("change", () => commit(() => { byId(m.id).kind = two.checked ? "rope2" : "rope"; }));
+    panel.append(el("label", { class: "check" }, two, t("field.twoWay")));
+  }
   if (leads(m.kind)) destSection(panel, m, editable);
   for (const [name, f] of Object.entries(k.fields)) {
-    panel.append(el("label", {}, t("field." + name)));
+    panel.append(el("label", {}, fieldWord(m.kind, name)));
     const v = m.fields?.[name] ?? "";
     let input;
     if (f.input === "longtext") input = el("textarea", { maxlength: ML.MAX_TEXT, disabled: !editable });
@@ -828,12 +869,16 @@ function changeLines(state) {
   const lines = [];
   const at = (m) => {
     const w = ML.where(m);
-    return (w ? `x ${w[0]}, z ${w[1]}` : "?") + ` (${floorShort(m.floor)})` + (m.dest ? ` → ${spotText(m.dest)}` : "");
+    return (w ? `x ${w[0]}, z ${w[1]}` : "?") + ` (${floorShort(m.floor)})` + (m.dest ? ` ${arrowOf(m)} ${spotText(m.dest)}` : "");
   };
   const what = (m) => {
     const name = KIND_UI[m.kind] ? t("kind." + m.kind) : m.kind;
     const f = m.fields || {};
     if (m.kind === "spawn") return `${name} ${f.monster || "?"}${f.count ? " ×" + f.count : ""}${f.radius ? " r" + f.radius : ""}`;
+    if (m.kind === "boss" || m.kind === "npc") {
+      const who = m.kind === "boss" ? f.monster : f.name;
+      return name + (who ? ` "${who}"` : "") + (f.schedule ? ` (🕑 ${f.schedule})` : "") + (f.label ? ` "${f.label}"` : "");
+    }
     const extra = m.cells ? " " + t("cells", m.cells.length) : m.points ? " " + t("points", m.points.length) : "";
     const text = f.label || f.text;
     return name + extra + (text ? ` "${text}"` : "");
@@ -843,6 +888,10 @@ function changeLines(state) {
     const kind = KIND_UI[c.kind] ? t("kind." + c.kind) : c.kind;
     if (c.op === "added") lines.push(`+ ${id} ${t("added")}: ${what(c.marker)} ${t("at")} ${at(c.marker)}`);
     else if (c.op === "removed") lines.push(`- ${id} ${t("removed")}: ${what(c.marker)} ${t("at")} ${at(c.marker)}`);
+    else if (c.op === "kind") {   // a rope made two-way, or back
+      const word = (k) => (KIND_UI[k] ? t("kind." + k) : k);
+      lines.push(`~ ${id} ${word(c.from)} ${t("kindChanged")} ${word(c.to)}`);
+    }
     else if (c.op === "moved") {
       const p = (w, f) => (w ? `x ${w[0]}, z ${w[1]}` : "?") + (c.floor_from !== c.floor_to ? ` (${floorShort(f)})` : "");
       const size = c.size_from != null ? `, ${c.size_from} → ${c.size_to}` : "";
@@ -853,7 +902,7 @@ function changeLines(state) {
       else lines.push(`~ ${id} ${kind} ${t("destMoved")}: ${spotText(c.from)} → ${spotText(c.to)}`);
     } else if (c.op === "edited") {
       const v = (x) => (x == null ? "∅" : typeof x === "string" ? `"${x}"` : x);
-      lines.push(`~ ${id} ${kind} ${t("edited")}: ${t("field." + c.field)}: ${v(c.old)} → ${v(c.new)}`);
+      lines.push(`~ ${id} ${kind} ${t("edited")}: ${fieldWord(c.kind, c.field)}: ${v(c.old)} → ${v(c.new)}`);
     } else lines.push(`~ ${id} ${kind} ${t(c.op + "Op")}`);
   }
   return lines;
