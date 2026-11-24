@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inflateRawSync } from "node:zlib";
-import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, LinkError, KINDS } from "../maplink.js";
+import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, cleanTitle, LinkError, KINDS } from "../maplink.js";
 import { WORDS, LANGS } from "../i18n.js";
 
 const sample = {
@@ -136,8 +136,11 @@ test("map things round trip, with and without a destination", async () => {
   const s = await decode(await encode(things));
   assert.deepEqual(s.markers, things.markers);
   assert.ok(!("dest" in s.markers[2]));
-  assert.deepEqual(KINDS.slice(5).map((k) => k.name), ["rope", "lever", "hole", "door", "portal"]);
+  assert.deepEqual(KINDS.slice(5).map((k) => k.name), ["rope", "lever", "hole", "door", "portal", "elevator"]);
   assert.deepEqual(KINDS.slice(0, 5).map((k) => k.name), ["spawn", "poi", "area", "route", "note"]);   // never reordered
+  // an elevator leads to another floor like a rope
+  const lift = { view: { floors: ["s"] }, markers: [{ id: 0, kind: "elevator", floor: "-2", locked: false, x: 4, z: 4, dest: { x: 4, z: 4, floor: "3" }, fields: { label: "elevador" } }] };
+  assert.deepEqual((await decode(await encode(lift))).markers, lift.markers);
 });
 
 test("a destination set, moved and removed are their own changes, apart from a move", async () => {
@@ -160,6 +163,24 @@ test("a destination set, moved and removed are their own changes, apart from a m
   m2[0].x += 1;
   const s2 = await decode(await encode(saveState(opened, m2, opened.view, opened.tiles, 5)));
   assert.deepEqual(changes(s2).map((x) => x.op), ["moved"]);
+});
+
+test("a map's title: carried, cleaned, capped, and only bytes after everything an older page reads", async () => {
+  const s = await decode(await encode({ ...things, title: "  Caverna\tdo leste \n" }));
+  assert.equal(s.title, "Caverna do leste");
+  assert.ok(!("title" in (await decode(await encode(things)))));   // no title: no key, as before
+  const long = await decode(await encode({ ...things, title: "x".repeat(80) + "你好" }));
+  assert.equal(long.title, "x".repeat(60));
+  assert.equal(cleanTitle("🙂".repeat(70)).length, 60 * 2);   // 60 characters, not 60 UTF-16 units
+  // the untitled payload is a prefix of the titled one: a page from before titles reads the same link
+  const plain = payloadOf(things), titled = payloadOf({ ...things, title: "Mapa" });
+  assert.deepEqual(titled.slice(0, plain.length), plain);
+  assert.ok(titled.length > plain.length);
+  // Save keeps it
+  const opened = await decode(await encode(things));
+  const saved = await decode(await encode(saveState(opened, opened.markers, opened.view, opened.tiles, opened.next, "Novo")));
+  assert.equal(saved.title, "Novo");
+  assert.deepEqual(changes(saved), []);
 });
 
 test("every language has every word", () => {

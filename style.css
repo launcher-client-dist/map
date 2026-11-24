@@ -25,6 +25,8 @@ button.danger { color: #fff; background: var(--danger); border-color: var(--dang
 #tools, #subtools, #actions, #settings { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 #tools { overflow-x: auto; flex-wrap: nowrap; max-width: 100%; }
 #settings { margin-left: auto; }
+#mapTitle { flex: 1 1 160px; min-width: 120px; max-width: 320px; font-weight: 600; background: #1b2029; }
+#mapTitle:placeholder-shown { font-weight: 400; }
 #settings label { color: var(--muted); display: flex; gap: 6px; align-items: center; }
 .tool .glyph { display: inline-block; width: 1.2em; text-align: center; }
 #banner { padding: 8px 12px; background: #2a2412; color: #f5d68a; border-bottom: 1px solid var(--line); }
@@ -36,12 +38,25 @@ button.danger { color: #fff; background: var(--danger); border-color: var(--dang
 .map { isolation: isolate; }
 .map.picking, .map.picking .leaflet-interactive { cursor: crosshair; }
 .tool .glyph svg { display: inline-block; vertical-align: -2px; }
-.tool.thing .txt { display: none; }
-.tool.thing { padding: 4px 7px; }
-.tool.thing .glyph.mk { width: 24px; height: 24px; }
-.tool.thing .glyph.mk svg { width: 14px; height: 14px; }
-.tool.thing.on .glyph.mk { border-color: #fff; box-shadow: 0 0 0 2px #fff6; }
-#tools .sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 3px; flex: none; }
+.tool.icon .txt { display: none; }
+.tool.icon { font-weight: 700; min-width: 36px; }
+.tool .glyph.mk { display: inline-flex; vertical-align: middle; width: 20px; height: 20px; }
+.tool .caret { margin-left: 4px; font-size: 11px; opacity: .8; }
+/* the map things' menu, under its button */
+#thingsMenu { position: fixed; z-index: 1500; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+              padding: 6px; box-shadow: 0 8px 30px rgba(0, 0, 0, .55); display: grid; gap: 2px; }
+#thingsMenu[hidden] { display: none; }
+#thingsMenu button { display: flex; gap: 10px; align-items: center; text-align: left; white-space: normal; border: 0;
+                     background: transparent; padding: 8px; min-height: 44px; }
+#thingsMenu button:hover, #thingsMenu button:focus-visible { background: #222833; }
+#thingsMenu button.on { background: #1d2a44; }
+#thingsMenu .mk { flex: none; }
+#thingsMenu div { display: flex; flex-direction: column; }
+#thingsMenu span { color: var(--muted); font-size: 12.5px; }
+/* floor up / down on each pane */
+.pane-head { display: flex; gap: 4px; align-items: center; }
+.pane-head select { flex: 1; min-width: 0; }
+.pane-head .fnav { min-height: 30px; padding: 2px 10px; font-size: 12px; }
 #subtools .pick { display: flex; align-items: center; gap: 6px; padding: 0 4px; }
 .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; border-left: 1px solid var(--line); }
 .pane:first-child { border-left: 0; }

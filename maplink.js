@@ -7,7 +7,9 @@
 //
 // payload (u: unsigned LEB128 varint, s: zigzag varint, str: u length + UTF-8):
 //   u version | str tile set ("" = newest) | view: s x, s z, s zoom, u panes, u floor code each
-//   u base | u next | u markers, marker each | u was, marker each
+//   u base | u next | u markers, marker each | u was, marker each | then, to the end, optional link fields
+//   (u key = index * 2 + type, value, as a marker's fields; unknown keys skipped): 0 the map's title (str)
+// A link without a title has no field bytes at all (as every link before titles); an older page ignores them.
 // base: ids below it were in the link this one was saved from; next: the next free id; was: the earlier state of every
 // marker of that link that was moved, edited or removed since.
 // marker: u kind | u id | u flags (1 locked) | u floor code | u length | body
@@ -17,8 +19,8 @@
 //   x, z), then fields to the end: u key (field index * 2 + type: 0 int as s, 1 str), value. Unknown keys skipped.
 // floor code: 0 the surface, else zigzag(slice) + 1.
 // In memory a pointdest marker is a point with an optional dest: {x, z, floor} (absolute; no key when there is none).
-// The kinds from code 5 on (rope .. portal) came after the first pages: a page from before them keeps such a marker as
-// raw bytes (an unknown kind), so the format version stayed 1.
+// The kinds from code 5 on (rope .. elevator) came after the first pages: a page from before them keeps such a marker
+// as raw bytes (an unknown kind), so the format version stayed 1.
 
 export const FORMAT = 1;
 export const MAX_PAYLOAD = 65536;
@@ -27,6 +29,14 @@ export const MAX_MARKERS = 1000;
 export const MAX_POINTS = 2000;
 export const MAX_CELLS = 40000;
 export const MAX_TOTAL = 60000;   // cells and route points of the whole link, markers and was together
+export const MAX_TITLE = 60;
+
+// A map's title: someone's text, one line, at most MAX_TITLE characters (Python's maplink.clean_title: the same rule)
+export function cleanTitle(text) {
+  const strip = (s) => s.replace(/^ +| +$/g, "");   // spaces only: the same on both sides
+  const one = strip(String(text ?? "").replace(/[\u0000-\u001f\u007f]/g, " "));
+  return strip(Array.from(one).slice(0, MAX_TITLE).join(""));
+}
 
 // Marker kinds by code: append only, a code is never reused.
 export const KINDS = [
@@ -41,6 +51,7 @@ export const KINDS = [
   { name: "hole", geometry: "pointdest", fields: [["label", "str"]] },
   { name: "door", geometry: "point", fields: [["label", "str"]] },
   { name: "portal", geometry: "pointdest", fields: [["label", "str"]] },
+  { name: "elevator", geometry: "pointdest", fields: [["label", "str"]] },
 ];
 export const KIND_CODE = Object.fromEntries(KINDS.map((k, i) => [k.name, i]));
 
@@ -255,6 +266,8 @@ export function payloadOf(state) {
     w.u(group.length);
     for (const m of group) writeMarker(w, m);
   }
+  const title = cleanTitle(state.title);
+  if (title) { w.u(1); w.str(title); }   // field 0, a str
   return w.out();
 }
 
@@ -314,7 +327,12 @@ export async function decode(text) {
     for (let i = 0; i < n; i++) list.push(readMarker(r, budget));
     groups.push(list);
   }
-  return { format: version, tiles, view, base, next, markers: groups[0], was: groups[1] };
+  const out = { format: version, tiles, view, base, next, markers: groups[0], was: groups[1] };
+  while (!r.done()) {   // the link's own fields
+    const key = r.u(), v = key % 2 ? r.str() : r.s();
+    if (key === 1) { const title = cleanTitle(v); if (title) out.title = title; }
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------------------------------------ changes
@@ -399,12 +417,14 @@ export function baselineOf(state) {
 
 // The state to save: the markers now, against the markers of the link the page opened with (opened: its decoded state).
 // Markers of that link that changed or were removed go into `was`; ids at or above opened.next are new.
-export function saveState(opened, markers, view, tiles, next) {
+export function saveState(opened, markers, view, tiles, next, title) {
   const now = new Map(markers.map((m) => [m.id, m]));
   const was = [];
   for (const m of opened.markers || []) {
     const n = now.get(m.id);
     if (!n || !same(m, n)) was.push(m);
   }
-  return { tiles, view, base: opened.next || 0, next, markers, was };
+  const s = { tiles, view, base: opened.next || 0, next, markers, was };
+  if (cleanTitle(title)) s.title = cleanTitle(title);
+  return s;
 }

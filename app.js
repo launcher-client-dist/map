@@ -26,10 +26,12 @@ const KIND_UI = {
   hole: { color: "#26292e", svg: svg('<path d="M8 1.5v4M6 3.8l2 2 2-2"/><ellipse cx="8" cy="10.5" rx="6" ry="3.5"/><ellipse cx="8" cy="11" rx="3.3" ry="1.7" fill="currentColor"/>'), fields: { label: { input: "text" } } },
   door: { color: "#5b6b82", svg: svg('<path d="M4 14.5V3.5A1.5 1.5 0 0 1 5.5 2h5A1.5 1.5 0 0 1 12 3.5v11"/><path d="M2.5 14.5h11"/><circle cx="10" cy="8.8" r=".8" fill="currentColor"/>'), fields: { label: { input: "text" } } },
   portal: { color: "#0fa3b8", svg: svg('<ellipse cx="8" cy="8" rx="4.6" ry="6.5"/><ellipse cx="8" cy="8" rx="2" ry="3.4"/><path d="M1.5 4.5l1 .6M14.5 11.5l-1-.6"/>'), fields: { label: { input: "text" } } },
+  elevator: { color: "#4c4fc9", svg: svg('<rect x="3" y="1.8" width="10" height="12.4" rx="1.6"/><path d="M8 3.9 10.3 6.6H5.7Z" fill="currentColor" stroke-width="1"/><path d="M8 12.1 5.7 9.4h4.6Z" fill="currentColor" stroke-width="1"/>'), fields: { label: { input: "text" } } },
 };
-const THINGS = ["rope", "lever", "hole", "door", "portal"];
-const TOOLS = ["select", "spawn", "poi", "area", "route", "note", "|", ...THINGS, "|", "legend"];
-const GLYPH = { select: "☝", legend: "?", ...Object.fromEntries(Object.entries(KIND_UI).map(([k, v]) => [k, v.glyph])) };
+// the map things: one menu in the bar ("Objects"), each kind with its icon, name and one line
+const THINGS = ["rope", "lever", "hole", "door", "portal", "elevator"];
+const TOOLS = ["select", "spawn", "poi", "area", "route", "note", "things", "legend"];
+const GLYPH = { select: "☝", legend: "?", things: "＋", ...Object.fromEntries(Object.entries(KIND_UI).map(([k, v]) => [k, v.glyph])) };
 const UNKNOWN = { color: "#888", glyph: "?", fields: {} };
 const ui = (m) => KIND_UI[m.kind] || UNKNOWN;
 // a kind whose marker can lead somewhere (rope, hole, portal)
@@ -76,6 +78,7 @@ let tool = "select";
 let areaMode = "brush";
 let draftRoute = null;   // {floor, points}
 let destFor = null;   // the "dest" tool: the id of the rope, hole or portal whose destination the next tap sets
+let mapTitle = "";   // the map's title (the link's, else ?title=): the tab and the header show it
 const undoStack = [], redoStack = [];
 let panes = [];
 let syncing = false;
@@ -87,8 +90,19 @@ const floorShort = (f) => (f === "s" ? t("surface") : t("floor", f));
 const leadsText = (f) => (f === "s" ? t("leadsSurface") : t("leadsFloor", f));
 const spotText = (d) => `x ${d.x}, z ${d.z} (${floorShort(d.floor)})`;
 
-function snapshot() { return { markers: clone(markers), nextId }; }
-function restore(s) { markers = clone(s.markers); nextId = s.nextId; if (selected != null && !byId(selected)) selected = null; }
+function snapshot() { return { markers: clone(markers), nextId, mapTitle }; }
+function restore(s) {
+  markers = clone(s.markers); nextId = s.nextId;
+  if (selected != null && !byId(selected)) selected = null;
+  if (s.mapTitle !== mapTitle) { mapTitle = s.mapTitle; showTitle(); }
+}
+
+// the title in the tab ("<title> - Opengea Map") and in the header's box; text only (document.title and .value)
+function showTitle() {
+  document.title = mapTitle ? t("titleWith", mapTitle) : t("title");
+  const box = $("mapTitle");
+  if (box.value !== mapTitle) box.value = mapTitle;
+}
 // every change to the markers goes through here: one undo step each
 function commit(fn) {
   const before = snapshot();
@@ -121,6 +135,7 @@ function tileLayer(floor, opacity = 1) {
 function buildPanes(floors, view) {
   for (const p of panes) p.map.remove();
   panes = [];
+  activePane = null;
   const box = $("panesBox");
   box.textContent = "";
   floors.forEach((floor, i) => {
@@ -128,13 +143,21 @@ function buildPanes(floors, view) {
     for (const f of tileMeta.floors) select.append(el("option", { value: f }, floorLabel(f)));
     select.value = floor;
     const mapEl = el("div", { class: "map" });
-    box.append(el("div", { class: "pane" }, el("div", { class: "pane-head" }, select), mapEl));
+    // the floor above / below (the next one with map in view), the view kept where it is
+    const up = el("button", { type: "button", class: "fnav", title: t("floorUp") + " (PageUp, ])", "aria-label": t("floorUp") }, "▲");
+    const down = el("button", { type: "button", class: "fnav", title: t("floorDown") + " (PageDown, [)", "aria-label": t("floorDown") }, "▼");
+    box.append(el("div", { class: "pane" }, el("div", { class: "pane-head" }, select, up, down), mapEl));
     const map = L.map(mapEl, { crs: CRS, minZoom: -2, maxZoom: 5, zoomSnap: 1, attributionControl: false,
       zoomControl: i === 0, doubleClickZoom: false, maxBounds: L.latLngBounds(tileMeta.bounds).pad(0.3), maxBoundsViscosity: 0.8 });
-    const p = { floor, map, el: mapEl, base: null, under: null, layer: L.layerGroup().addTo(map), draft: L.layerGroup().addTo(map) };
+    const p = { floor, map, el: mapEl, select, up, down, base: null, under: null, layer: L.layerGroup().addTo(map), draft: L.layerGroup().addTo(map) };
     panes.push(p);
     setFloor(p, floor);
     select.addEventListener("change", () => { setFloor(p, select.value); refresh(); });
+    up.addEventListener("click", () => stepFloor(p, -1));
+    down.addEventListener("click", () => stepFloor(p, 1));
+    mapEl.addEventListener("pointerenter", () => { activePane = p; });
+    mapEl.addEventListener("pointerdown", () => { activePane = p; });
+    map.on("moveend", () => paintFloorNav(p));
     map.setView(ll(view.x, view.z), view.zoom, { animate: false });
     map.on("move", () => { sync(p); drawLinksSoon(); });
     map.on("zoomend resize", drawLinksSoon);
@@ -158,11 +181,54 @@ function buildPanes(floors, view) {
 
 function setFloor(p, floor) {
   p.floor = floor;
+  if (p.select && p.select.value !== floor) p.select.value = floor;
   if (p.base) p.map.removeLayer(p.base);
   if (p.under) p.map.removeLayer(p.under);
   p.under = floor === "s" ? null : tileLayer("s", 0.14).addTo(p.map);   // the surface, dim, under a floor below it
   p.base = tileLayer(floor).addTo(p.map);
   p.layer.bringToFront?.();
+  paintFloorNav(p);
+}
+
+// ---- floor up / down. tileMeta.floors runs from the top (the surface, then 10 .. -16); a step skips floors with no
+// map tile in the pane's view (blank there), and the view stays where it is.
+let activePane = null;   // the pane the shortcuts move: the last one pointed at
+
+function hasMapInView(p, floor) {
+  const have = new Set(tileMeta.tiles[floor]?.["0"] || []);
+  if (!have.size) return false;
+  const b = p.map.getBounds();
+  const a = p.map.project(b.getNorthWest(), 0), c = p.map.project(b.getSouthEast(), 0);
+  for (let tx = Math.floor(a.x / 256); tx <= Math.floor(c.x / 256); tx++)
+    for (let ty = Math.floor(a.y / 256); ty <= Math.floor(c.y / 256); ty++) if (have.has(tx + "_" + ty)) return true;
+  return false;
+}
+
+// dir -1: the floor above, +1: the floor below; null when there is none with map here
+function nextFloor(p, dir) {
+  const fl = tileMeta.floors;
+  for (let i = fl.indexOf(p.floor) + dir; i >= 0 && i < fl.length; i += dir) if (hasMapInView(p, fl[i])) return fl[i];
+  return null;
+}
+
+function stepFloor(p, dir) {
+  const f = p && nextFloor(p, dir);
+  if (!f) return;
+  setFloor(p, f);
+  refresh();
+  showCoordsFloor(p);
+}
+
+function paintFloorNav(p) {
+  if (!p.up || !tileMeta) return;
+  try { p.map.getCenter(); } catch { return; }   // no view yet (a pane being built): its first moveend paints it
+  p.up.disabled = !nextFloor(p, -1);
+  p.down.disabled = !nextFloor(p, 1);
+}
+
+// the bottom bar names the floor the pane now shows (the cursor may not have moved)
+function showCoordsFloor(p) {
+  $("coords").textContent = $("coords").textContent.replace(/[^·]*$/, " " + floorLabel(p.floor));
 }
 
 function sync(src) {
@@ -459,7 +525,11 @@ function applyTool() {
 
 // the bar, the sub-bar and the maps' cursor for the tool (no redraw of the markers)
 function paintTools() {
-  for (const b of $("tools").children) b.classList.toggle("on", b.dataset.tool === (tool === "dest" ? byId(destFor)?.kind : tool));
+  const thing = activeThing();
+  for (const b of $("tools").children) b.classList.toggle("on", b.dataset.tool === (thing ? "things" : tool === "dest" ? byId(destFor)?.kind : tool));
+  // the menu's button wears the chosen thing's marker while it is in use
+  const tb = document.querySelector("[data-tool=things]");
+  if (tb) tb.firstChild.replaceWith(thing ? dotNode(thing, "glyph mk mini") : glyphNode("things"));
   for (const p of panes) {
     const paint = tool === "area";
     p.el.classList.toggle("painting", paint);
@@ -497,6 +567,49 @@ function setTool(name) {
   if (name === "area") toast(t("hintArea"));
   else if (name === "route") toast(t("hintRoute"));
   else if (name !== "select") toast(`${t("kind." + name)}: ${t("hintPlace")}`);
+}
+
+// ---- the map things' menu: rope, lever, hole, door, portal, elevator (icon, name, one line each)
+function buildThingsMenu() {
+  const menu = el("div", { id: "thingsMenu", role: "menu", hidden: true });
+  for (const kind of THINGS) {
+    menu.append(el("button", { type: "button", role: "menuitem", "data-kind": kind, onclick: () => { closeThings(); setTool(kind); } },
+      dotNode(kind, "mk"), el("div", {}, el("b", {}, t("kind." + kind)), el("span", {}, t("help." + kind)))));
+  }
+  document.body.append(menu);
+  // a tap anywhere else closes it
+  document.addEventListener("pointerdown", (e) => {
+    if (!menu.hidden && !e.target.closest("#thingsMenu, [data-tool=things]")) closeThings();
+  }, true);
+  window.addEventListener("resize", closeThings);
+}
+
+function toggleThings() {
+  const menu = $("thingsMenu"), btn = document.querySelector("[data-tool=things]");
+  if (!menu.hidden) { closeThings(); return; }
+  menu.hidden = false;
+  // under its button, inside the screen (a phone: the whole width less a margin)
+  const r = btn.getBoundingClientRect(), w = Math.min(320, innerWidth - 16);
+  menu.style.width = w + "px";
+  menu.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + "px";
+  menu.style.top = r.bottom + 4 + "px";
+  btn.setAttribute("aria-expanded", "true");
+  for (const b of menu.children) b.classList.toggle("on", b.dataset.kind === activeThing());
+  (menu.querySelector(".on") || menu.firstChild).focus();
+}
+
+function closeThings() {
+  const menu = $("thingsMenu");
+  if (!menu || menu.hidden) return false;
+  menu.hidden = true;
+  document.querySelector("[data-tool=things]")?.setAttribute("aria-expanded", "false");
+  return true;
+}
+
+// the map thing being placed (or whose destination is being picked), else null
+function activeThing() {
+  const k = tool === "dest" ? byId(destFor)?.kind : tool;
+  return THINGS.includes(k) ? k : null;
 }
 
 // what each marker is: every kind's icon, name and one line, and how a destination is drawn
@@ -708,11 +821,7 @@ function destSection(panel, m, editable) {
 
 // bring a destination into view: centre the panes on it, and when no pane shows its floor, switch the last one to it
 function showDest(d) {
-  if (!panes.some((p) => p.floor === d.floor)) {
-    const p = panes[panes.length - 1];
-    setFloor(p, d.floor);
-    p.el.parentElement.querySelector(".pane-head select").value = d.floor;
-  }
+  if (!panes.some((p) => p.floor === d.floor)) setFloor(panes[panes.length - 1], d.floor);
   panes[0].map.setView(ll(d.x, d.z), Math.max(panes[0].map.getZoom(), 2));
   refresh();
 }
@@ -769,16 +878,20 @@ function summaryText(lines, max = 12) {
 function linkFor(frag) {
   const q = new URLSearchParams(location.search);
   q.delete("staff");
+  q.delete("title");   // the saved link carries its title in the fragment (or none, if it was cleared)
   const qs = q.toString();
   return location.origin + location.pathname + (qs ? "?" + qs : "") + "#" + frag;
 }
 
 async function save() {
   finishRoute();
-  const state = ML.saveState(opened, clone(markers), currentView(), tileVersion, nextId);
+  const state = ML.saveState(opened, clone(markers), currentView(), tileVersion, nextId, mapTitle);
   const frag = await ML.encode(state);
   const url = linkFor(frag);
-  history.replaceState(null, "", location.pathname + location.search + "#" + frag);
+  // the address bar: the saved link, ?staff kept, ?title dropped (the fragment holds the title now)
+  const here = new URLSearchParams(location.search);
+  here.delete("title");
+  history.replaceState(null, "", location.pathname + (here.toString() ? "?" + here : "") + "#" + frag);
   const lines = changeLines(await ML.decode(frag));
   const message = summaryText(lines) + "\n" + url;
   const d = $("dialog");
@@ -827,15 +940,17 @@ function banner(text, cls, button) {
 function buildBar() {
   const tools = $("tools");
   for (const name of TOOLS) {
-    if (name === "|") { tools.append(el("span", { class: "sep", "aria-hidden": "true" })); continue; }
-    const thing = THINGS.includes(name);
     const word = name === "legend" ? t("legend") : t("tool." + name);
-    // map things: icon-only buttons, the marker itself as on the map; the title (and the legend) says what each is
-    const glyph = thing ? dotNode(name, "glyph mk mini") : glyphNode(name);
-    tools.append(el("button", { type: "button", class: "tool" + (thing ? " thing" : ""), "data-tool": name,
-      title: thing ? `${word}: ${t("help." + name)}` : word, "aria-label": word, onclick: () => setTool(name) },
-    glyph, el("span", { class: "txt" }, " " + word)));
+    const attrs = { type: "button", class: "tool" + (name === "legend" ? " icon" : ""), "data-tool": name, title: word,
+      "aria-label": word, onclick: () => setTool(name) };
+    if (name === "things") {   // the map things' menu: its button shows the chosen one's marker
+      Object.assign(attrs, { title: t("thingsTitle"), "aria-haspopup": "menu", "aria-expanded": "false", onclick: toggleThings });
+      tools.append(el("button", attrs, glyphNode("things"), el("span", { class: "txt" }, " " + word), el("span", { class: "caret" }, "▾")));
+      continue;
+    }
+    tools.append(el("button", attrs, glyphNode(name), el("span", { class: "txt" }, " " + word)));
   }
+  buildThingsMenu();
   const label = (id, glyph, word) => {
     $(id).append(el("span", { class: "glyph" }, glyph), el("span", { class: "txt" }, " " + word));
     $(id).title = word;
@@ -847,6 +962,22 @@ function buildBar() {
   $("redo").onclick = redo;
   $("save").onclick = save;
   $("panesLabel").textContent = t("panes");
+  // the map's title: typed in the header; one undo step per change. Made here, not in index.html, so a cached older
+  // index.html with this script still works.
+  const tb = el("input", { id: "mapTitle", type: "text", autocomplete: "off", spellcheck: "false" });
+  $("settings").before(tb);
+  tb.placeholder = t("mapTitle");
+  tb.title = t("mapTitle");
+  tb.setAttribute("aria-label", t("mapTitle"));
+  tb.maxLength = ML.MAX_TITLE;
+  tb.addEventListener("input", () => { document.title = ML.cleanTitle(tb.value) ? t("titleWith", ML.cleanTitle(tb.value)) : t("title"); });
+  tb.addEventListener("change", () => {
+    const v = ML.cleanTitle(tb.value);
+    if (v === mapTitle) { tb.value = mapTitle; return; }
+    commit(() => { mapTitle = v; });
+    showTitle();
+  });
+  tb.addEventListener("keydown", (e) => { if (e.key === "Enter") tb.blur(); });
   const ls = $("lang");
   for (const l of LANGS) ls.append(el("option", { value: l }, { pt: "Português", en: "English", es: "Español", zh: "中文" }[l]));
   ls.value = lang;
@@ -873,6 +1004,9 @@ function buildBar() {
     else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
     else if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
     else if (e.key === "Enter" && tool === "route") finishRoute();
+    else if (!mod && (e.key === "PageUp" || e.key === "]")) { e.preventDefault(); stepFloor(activePane || panes[0], -1); }
+    else if (!mod && (e.key === "PageDown" || e.key === "[")) { e.preventDefault(); stepFloor(activePane || panes[0], 1); }
+    else if (e.key === "Escape" && closeThings()) return;
     else if (e.key === "Escape" && tool === "dest") endDestPick();
     else if (e.key === "Escape") { draftRoute = null; selected = null; if (tool !== "select") setTool("select"); else refresh(); }
   });
@@ -904,6 +1038,9 @@ async function start() {
     const lines = changeLines(state);
     if (lines.length) banner(t("linkChanges", lines.length), "", el("button", { type: "button", onclick: () => showChanges(lines) }, t("view")));
   }
+  // the title: the link's own, else ?title= (someone's text either way: cleaned, shown as text only)
+  mapTitle = state?.title || ML.cleanTitle(new URLSearchParams(location.search).get("title"));
+  showTitle();
   $("panes").value = String(view.floors.length);
   buildPanes(view.floors, view);
   // read-only hooks for the page's browser tests
