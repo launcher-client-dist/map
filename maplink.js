@@ -12,9 +12,13 @@
 // marker of that link that was moved, edited or removed since.
 // marker: u kind | u id | u flags (1 locked) | u floor code | u length | body
 //   body: geometry (point: s x, s z; line: u n, then n x (s dx, s dz) from the previous point, the first from 0,0;
-//   cells: u runs, each s dz, s dx from the previous run's z and first x, u length-1; runs sorted by z then x),
-//   then fields to the end: u key (field index * 2 + type: 0 int as s, 1 str), value. Unknown keys skipped.
+//   cells: u runs, each s dz, s dx from the previous run's z and first x, u length-1; runs sorted by z then x;
+//   pointdest: s x, s z, u d (0: no destination, else the destination's floor code + 1), and when d: s dx, s dz from
+//   x, z), then fields to the end: u key (field index * 2 + type: 0 int as s, 1 str), value. Unknown keys skipped.
 // floor code: 0 the surface, else zigzag(slice) + 1.
+// In memory a pointdest marker is a point with an optional dest: {x, z, floor} (absolute; no key when there is none).
+// The kinds from code 5 on (rope .. portal) came after the first pages: a page from before them keeps such a marker as
+// raw bytes (an unknown kind), so the format version stayed 1.
 
 export const FORMAT = 1;
 export const MAX_PAYLOAD = 65536;
@@ -31,6 +35,12 @@ export const KINDS = [
   { name: "area", geometry: "cells", fields: [["label", "str"]] },
   { name: "route", geometry: "line", fields: [["label", "str"]] },
   { name: "note", geometry: "point", fields: [["text", "str"]] },
+  // map things: ropes, holes and portals lead somewhere (an optional destination, on any floor)
+  { name: "rope", geometry: "pointdest", fields: [["label", "str"]] },
+  { name: "lever", geometry: "point", fields: [["label", "str"]] },
+  { name: "hole", geometry: "pointdest", fields: [["label", "str"]] },
+  { name: "door", geometry: "point", fields: [["label", "str"]] },
+  { name: "portal", geometry: "pointdest", fields: [["label", "str"]] },
 ];
 export const KIND_CODE = Object.fromEntries(KINDS.map((k, i) => [k.name, i]));
 
@@ -145,7 +155,11 @@ function bodyOf(m) {
   const k = KINDS[KIND_CODE[m.kind]];
   const w = new Writer();
   if (k.geometry === "point") { w.s(m.x); w.s(m.z); }
-  else if (k.geometry === "line") {
+  else if (k.geometry === "pointdest") {
+    w.s(m.x); w.s(m.z);
+    if (m.dest) { w.u(floorCode(m.dest.floor ?? "s") + 1); w.s(m.dest.x - m.x); w.s(m.dest.z - m.z); }
+    else w.u(0);
+  } else if (k.geometry === "line") {
     w.u(m.points.length);
     let px = 0, pz = 0;
     for (const [x, z] of m.points) { w.s(x - px); w.s(z - pz); px = x; pz = z; }
@@ -187,7 +201,11 @@ function readMarker(r, budget = { left: MAX_TOTAL }) {
   m.kind = k.name;
   const b = new Reader(body);
   if (k.geometry === "point") { m.x = b.s(); m.z = b.s(); }
-  else if (k.geometry === "line") {
+  else if (k.geometry === "pointdest") {
+    m.x = b.s(); m.z = b.s();
+    const d = b.u();
+    if (d) { const floor = floorOf(d - 1); m.dest = { x: m.x + b.s(), z: m.z + b.s(), floor }; }
+  } else if (k.geometry === "line") {
     const n = b.u();
     if (n > MAX_POINTS) throw new LinkError("route too long");
     spend(n);
@@ -333,7 +351,10 @@ function geometryKey(m) {
   return "raw" + m.raw;
 }
 
-// [{op: added|moved|edited|locked|unlocked|removed, id, kind, ...}] in id order (Python's maplink.changes)
+const destKey = (m) => (m.dest ? m.dest.x + "," + m.dest.z + "," + m.dest.floor : "");
+
+// [{op: added|moved|dest|edited|locked|unlocked|removed, id, kind, ...}] in id order (Python's maplink.changes)
+// moved: the marker itself (its geometry or floor); dest: its destination {x, z, floor} from -> to (null: none)
 export function changes(state) {
   const base = state.base || 0;
   const was = new Map((state.was || []).map((m) => [m.id, m]));
@@ -352,6 +373,8 @@ export function changes(state) {
       }
       out.push(c);
     }
+    // where a rope, hole or portal leads: set (from null), moved, or removed (to null); apart from the marker's own move
+    if (destKey(a) !== destKey(b)) out.push({ op: "dest", id, kind: b.kind, from: a.dest || null, to: b.dest || null });
     const fa = a.fields || {}, fb = b.fields || {};
     for (const name of [...new Set([...Object.keys(fa), ...Object.keys(fb)])].sort()) {
       if (fa[name] !== fb[name]) out.push({ op: "edited", id, kind: b.kind, field: name, old: fa[name] ?? null, new: fb[name] ?? null });

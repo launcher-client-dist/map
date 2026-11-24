@@ -10,9 +10,15 @@ and posts the new link (with its list of changes) back in their ticket.
 - **Coordinates:** the bar at the bottom shows the cell under the cursor; a click on the map copies a `/pos`-style line.
 - **Markers:** monster spawn (monster, how many, radius), point, area (paint cells: brush, rectangle, erase), route,
   note. Select one to drag it, change its fields or delete it. Undo/redo: the buttons, Ctrl+Z, Ctrl+Y.
+- **Map things:** rope, lever, hole, door, portal (the round buttons in the bar; **?** shows what each marker is). A rope,
+  hole or portal can say **where it leads**: place it and the page asks at once (tap the spot, on any floor: change the
+  floor above the map first, or show floors side by side; **Skip** leaves it for later). Later: select it, then
+  **Change**, **View**, **Remove**, or its destination floor in the panel; drag the small end marker to move it. Same
+  floor: a dashed arrow. Another floor: "leads to floor N" on its label, the end marker on that floor, and an arrow
+  across the panes when both floors are shown.
 - **Locked markers** (🔒) are context: shown, but they can't be moved or changed.
 - **Save** gives the link and a summary of what changed against the link you opened: added, moved (from → to), edited
-  (field: old → new), removed.
+  (field: old → new), removed, and a destination set, moved or removed.
 - **Language:** Português, English, Español, 中文 (`?lang=pt|en|es|zh`, else the browser's).
 
 ## The link
@@ -21,8 +27,14 @@ Everything is in the URL `#fragment` (never sent to the server): `#1.` + base64u
 format version. The format is documented at the top of `maplink.js`. Kinds of markers only get added, never renumbered,
 and markers of a kind a page doesn't know are kept unchanged, so old links keep working.
 
+Ropes, holes and portals came later as new kinds with an optional destination (still format 1): a page from before
+them keeps such a marker unchanged.
+
 A made-up example (a locked area "A", a spawn, a point and a note):
 `https://map.opengea.tech/?lang=en#1.Y2QIKGdhZGBhYWFiYGTgZU63YWJiACFGRkegAANvVCMjI0t4fk4aEwcLGyMTAwNHSi4jS0ZqUSoLMwMDv1s3IyNXcUFieZ5CZkpqIgMA`
+
+Another, made up too: one of each map thing, a rope from the surface to floor -4 and a portal back up:
+`https://map.opengea.tech/?lang=en#1.Y2Q10DPSM7QJYGFi4GAFAgYGBj6zEE4WRkb25PyilEQFQzZGBg4eJw9GjsScxLLEvOREdiYGBma3CAYOZkYOTjsfRtaC_KKSRE4WBg5eAzdGHi5GNrBADgMA`
 
 ## Files
 
