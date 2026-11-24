@@ -12,10 +12,11 @@ and posts the new link (with its list of changes) back in their ticket.
 - **Title:** the box in the bar names the map; the browser tab shows it ("Title - Opengea Map"). A link carries it;
   `?title=...` gives one to a link that has none.
 - **Coordinates:** the bar at the bottom shows the cell under the cursor; a click on the map copies a `/pos`-style line.
-- **Markers:** monster spawn (monster, how many, radius), point, area (paint cells: brush, rectangle, erase), route,
-  note. Select one to drag it, change its fields or delete it. Undo/redo: the buttons, Ctrl+Z, Ctrl+Y.
-- **Map things:** rope, lever, hole, door, portal, elevator (the **Objects** menu in the bar; **?** shows what each
-  marker is). A rope, hole, portal or elevator can say **where it leads**: place it and the page asks at once (tap the
+- **Markers:** monster spawn (monster, how many, radius), boss (monster, when it comes, a note: a crown in a ringed
+  disc, the schedule under its name), point, area (paint cells: brush, rectangle, erase), route, note. Select one to drag it, change its fields or delete it. Undo/redo: the buttons, Ctrl+Z, Ctrl+Y.
+- **Map things:** rope, two-way rope, lever, hole, door, portal, elevator, NPC (name, when it is there, what it sells
+  or does) (the **Objects** menu in the bar; **?** shows what each marker is). A two-way rope (goes and comes back) is
+  drawn with a head at both ends of its arrow and ↔ on its label; a rope's panel turns it two-way and back. A rope, hole, portal or elevator can say **where it leads**: place it and the page asks at once (tap the
   spot, on any floor: change the floor above the map first (▲ ▼), or show floors side by side; **Skip** leaves it for
   later). Later: select it, then
   **Change**, **View**, **Remove**, or its destination floor in the panel; drag the small end marker to move it. Same
@@ -23,7 +24,7 @@ and posts the new link (with its list of changes) back in their ticket.
   across the panes when both floors are shown.
 - **Locked markers** (🔒) are context: shown, but they can't be moved or changed.
 - **Save** gives the link and a summary of what changed against the link you opened: added, moved (from → to), edited
-  (field: old → new), removed, and a destination set, moved or removed.
+  (field: old → new), removed, a destination set, moved or removed, and a rope made two-way (or one-way).
 - **Language:** Português, English, Español, 中文 (`?lang=pt|en|es|zh`, else the browser's).
 
 ## The link
@@ -42,7 +43,8 @@ markers of a kind a page doesn't know are kept unchanged, so old links keep work
 
 Map things (rope .. elevator) came later as new kinds, ropes, holes, portals and elevators with an optional destination,
 and a link may end with its own fields (the title); still format 1: a page from before them keeps such a marker
-unchanged and ignores the title.
+unchanged and ignores the title. The two-way rope, the boss and the NPC (codes 11..13) came after format 2: each is
+a length and a format-1 body, so the page before them keeps such a marker unchanged too.
 
 Two made-up format-1 examples, which still open (a locked area "A", a spawn, a point and a note):
 `https://map.opengea.tech/?lang=en#1.Y2QIKGdhZGBhYWFiYGTgZU63YWJiACFGRkegAANvVCMjI0t4fk4aEwcLGyMTAwNHSi4jS0ZqUSoLMwMDv1s3IyNXcUFieZ5CZkpqIgMA`
