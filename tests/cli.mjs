@@ -1,7 +1,9 @@
-// For the cross tests of the staff tools: node tests/cli.mjs encode|decode|payload|payload1|changes|monsters, input on
+// For the cross tests of the staff tools: node tests/cli.mjs encode|decode|payload|payload1|changes|schedule|monsters, input on
 // stdin (payload: format 2's head + text; payload1: format 1's payload).
 import { encode, decode, payloadOf, changes } from "../maplink.js";
 import { MONSTERS } from "../monsters.js";
+import { translator } from "../i18n.js";
+import { scheduleText } from "../schedule.js";
 
 const input = (await new Promise((ok) => { let s = ""; process.stdin.on("data", (d) => (s += d)); process.stdin.on("end", () => ok(s)); })).trim();
 const cmd = process.argv[2];
@@ -10,5 +12,9 @@ else if (cmd === "decode") process.stdout.write(JSON.stringify(await decode(inpu
 else if (cmd === "payload") process.stdout.write(Buffer.from(payloadOf(JSON.parse(input))).toString("hex"));
 else if (cmd === "payload1") process.stdout.write(Buffer.from(payloadOf(JSON.parse(input), 1)).toString("hex"));
 else if (cmd === "changes") process.stdout.write(JSON.stringify(changes(await decode(input))));
+else if (cmd === "schedule") {   // a list of schedule codes -> their words in pt and en (maplink.py: the same)
+  const codes = JSON.parse(input);
+  process.stdout.write(JSON.stringify(Object.fromEntries(["pt", "en"].map((l) => [l, codes.map((c) => scheduleText(c, translator(l)))]))));
+}
 else if (cmd === "monsters") process.stdout.write(JSON.stringify(MONSTERS));
-else { console.error("usage: node tests/cli.mjs encode|decode|payload|payload1|changes|monsters < input"); process.exit(2); }
+else { console.error("usage: node tests/cli.mjs encode|decode|payload|payload1|changes|schedule|monsters < input"); process.exit(2); }

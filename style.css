@@ -114,6 +114,14 @@ dialog .warn { color: #f5d68a; }
 .chev svg { width: 16px; height: 16px; display: block; }
 #panel .dest { display: flex; gap: 8px; align-items: center; font-variant-numeric: tabular-nums; }
 #panel .row.tight { margin-top: 6px; }
+/* a boss's or an NPC's schedule: a segmented control, its inputs, and the words it will show */
+#panel .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+#panel .seg button { flex: 1; border: 0; border-radius: 0; padding: 6px 4px; white-space: normal; line-height: 1.2; }
+#panel .seg button + button { border-left: 1px solid var(--line); }
+#panel .sched-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; color: var(--muted); font-size: 13px; }
+#panel .sched-row select, #panel .sched-row input { width: auto; flex: 1; min-width: 0; }
+#panel .sched-row button { flex: 1; }
+#panel .sched-preview { margin-top: 6px; padding: 5px 8px; border-radius: 6px; background: #0e1116; font-size: 13px; }
 ul.legend { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 8px;
             grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
 ul.legend li { display: flex; gap: 10px; align-items: center; }
@@ -128,6 +136,9 @@ ul.legend li span { color: var(--muted); font-size: 13px; }
 .leaflet-tooltip.lbl .sched { font-size: 11px; opacity: .9; }
 .mk .badge { position: absolute; right: -8px; top: -8px; background: #000; color: #fff; border-radius: 9px;
              font-size: 11px; padding: 0 4px; line-height: 16px; border: 1px solid #fff; }
+/* a teleport-like object locked in battle: crossed swords on its corner */
+.mk { position: relative; }
+.mk .badge.cb { right: -9px; top: -9px; padding: 0 2px; font-size: 10px; line-height: 14px; background: #b42318; }
 .handle { width: 16px; height: 16px; border-radius: 50%; background: #ffe066; border: 2px solid #000; }
 .handle.move { width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
                font-size: 13px; color: #000; }

@@ -2,9 +2,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inflateRawSync, deflateRawSync } from "node:zlib";
-import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, cleanTitle, LinkError, KINDS, CORE_KINDS, FORMAT, outlinesOf, monsterIndex } from "../maplink.js";
+import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, cleanTitle, LinkError, KINDS, KIND_CODE, CORE_KINDS, FORMAT, outlinesOf, monsterIndex } from "../maplink.js";
 import { MONSTERS } from "../monsters.js";
-import { WORDS, LANGS } from "../i18n.js";
+import { WORDS, LANGS, translator } from "../i18n.js";
+import { parseSchedule, scheduleCode, scheduleText, windowTag } from "../schedule.js";
+import { BOSSES, bossOf } from "../bosses.js";
 import { nextFloor, tilesInView } from "../floors.js";
 
 const sample = {
@@ -356,4 +358,56 @@ test("a rope made two-way (or one-way) is its own change", async () => {
   const saved = await decode(await encode(saveState(opened, m, opened.view, opened.tiles, 5)));
   assert.deepEqual(changes(saved).map((c) => [c.op, c.id, c.from?.toString() ?? null]),
     [["kind", 0, "rope2"], ["kind", 1, "rope"], ["moved", 1, "30,30"]]);
+});
+
+// ------------------------------------------------------------------------------------------------ schedules, bosses
+test("schedules: each mode's compact code, its words, and an older link's free text kept", async () => {
+  const pt = translator("pt"), en = translator("en");
+  assert.deepEqual(parseSchedule(""), { mode: "always" });
+  assert.deepEqual(parseSchedule("h05"), { mode: "hour", minute: 5 });
+  assert.deepEqual(parseSchedule("g18-06"), { mode: "game", from: 18, to: 6 });
+  for (const s of ["h60", "h5", "g24-01", "g1-4", "toda hora no :05"]) assert.deepEqual(parseSchedule(s), { mode: "custom", text: s });
+  for (const s of ["", "h00", "h59", "g00-23", "g18-06"]) assert.equal(scheduleCode(parseSchedule(s)), s);
+  assert.equal(scheduleCode({ mode: "hour", minute: 99 }), "h59");
+  assert.equal(scheduleText("h05", pt), "toda hora real, no :05");
+  assert.equal(scheduleText("g01-04", pt), "das 01h às 04h do jogo (noite) · :02:30–:10 de cada hora real");
+  assert.equal(scheduleText("g06-18", en), "from 06:00 to 18:00 game time (day) · :15–:45 of every real hour");
+  assert.equal(scheduleText("g02-00", pt), "das 02h às 00h do jogo · :05–:00 de cada hora real");   // day and night: no tag
+  assert.equal(scheduleText("", pt), "sempre (respawn normal)");
+  assert.equal(scheduleText("noite", pt), "Personalizado: noite");
+  assert.equal(windowTag(18, 6), "night");
+  // in a link: a boss every hour at :05, an NPC out at night, an older link's free text
+  const s = { view: { floors: ["s"] }, markers: [
+    { id: 0, kind: "boss", floor: "s", locked: false, x: 1, z: 1, fields: { monster: "The Broodmother", schedule: "h05" } },
+    { id: 1, kind: "npc", floor: "s", locked: false, x: 2, z: 2, fields: { name: "Gavin", schedule: "g18-06" } },
+    { id: 2, kind: "boss", floor: "s", locked: false, x: 3, z: 3, fields: { monster: "Meu Chefe", schedule: "toda hora no :05" } },
+    { id: 3, kind: "boss", floor: "s", locked: false, x: 4, z: 4, fields: { monster: "Alpha Wolf" } },
+  ] };
+  assert.deepEqual((await decode(await encode(s))).markers, s.markers);
+});
+
+test("the boss list: every name once, sorted, each prefill a game window", () => {
+  const names = BOSSES.map(([n]) => n);
+  assert.deepEqual(names, [...new Set(names)].sort());
+  for (const [, code] of BOSSES) assert.ok(code === "" || parseSchedule(code).mode === "game", code);
+  assert.deepEqual(bossOf("the broodmother"), { name: "The Broodmother", schedule: "g01-04" });
+  assert.equal(bossOf("Meu Chefe"), null);
+});
+
+test("combat lock: a teleport-like object's extra field, set, unset (the link as before) and a change of its own", async () => {
+  const rope = { id: 0, kind: "rope", floor: "s", locked: false, x: 1, z: 1, dest: { x: 2, z: 2, floor: "-1" }, fields: { label: "a" } };
+  const s = { view: { floors: ["s"] }, markers: [rope, { ...structuredClone(rope), id: 1, kind: "rope2" }, { id: 2, kind: "door", floor: "s", locked: false, x: 0, z: 0, fields: {} }] };
+  const plain = payloadOf(s);
+  assert.equal(plain[11], 0);   // no lock: link flags 0, the bytes as before
+  const locked = structuredClone(s);
+  locked.markers[0].fields.combat = 1;
+  locked.markers[1].fields.combat = 1;
+  assert.equal(payloadOf(locked)[11], 1);   // set: link flag 1, an extra section after each record
+  assert.deepEqual((await decode(await encode(locked))).markers, locked.markers);
+  const v1 = "1." + Buffer.from(deflateRawSync(payloadOf(locked, 1))).toString("base64url");
+  assert.deepEqual((await decode(v1)).markers, locked.markers);
+  for (const k of ["rope", "rope2", "lever", "hole", "portal", "elevator"]) assert.deepEqual(KINDS[KIND_CODE[k]].extra, [["combat", "int"]], k);
+  const opened = await decode(await encode(s));
+  const saved = await decode(await encode(saveState(opened, locked.markers, opened.view, opened.tiles, 3)));
+  assert.deepEqual(changes(saved).map((c) => [c.op, c.id, c.field, c.new]), [["edited", 0, "combat", 1], ["edited", 1, "combat", 1]]);
 });

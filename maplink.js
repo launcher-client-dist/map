@@ -34,7 +34,8 @@
 //   - fields, in the kind's order, each 1 bit present: int: 1 (as this kind's previous value) or 0 z_1(v); the spawn's
 //     monster: 1 listed (1 as the previous listed one, or 0 e_4(index in MONSTERS)) or 0 a string; str: a string
 //     (its text comes after the records). With link flag 1: g(n + 1) extra fields, each g(key + 1) (index * 2 + type)
-//     and z_1(v) or a string (a page that doesn't know them drops them).
+//     and z_1(v) or a string (a page that doesn't know them drops them): a core kind's extra fields (KINDS), e.g. the
+//     teleport kinds' combat lock; set only when some marker has one.
 //   A listed monster this page's MONSTERS doesn't have yet (a newer page's) reads as "#index" and is written back so.
 //
 // ---- format 1 (still read; same() and markerBytes() use its marker bytes)
@@ -79,7 +80,12 @@ export function cleanTitle(text) {
   return strip(Array.from(one).slice(0, MAX_TITLE).join(""));
 }
 
-// Marker kinds by code: append only, a code is never reused.
+// Marker kinds by code: append only, a code is never reused. extra: fields added to a kind after format 2 packed its
+// fields as bits, keyed after them (index fields.length + j): in a format-1 body as any field (an older page skips the
+// key), in a format-2 record in the extra section of link flag 1 (an older page reads past it). Unset, a link is byte
+// for byte what it was. combat: a teleport-like object that can't be used while the player is in battle (1; absent: no
+// lock).
+const COMBAT = [["combat", "int"]];
 export const KINDS = [
   { name: "spawn", geometry: "point", fields: [["monster", "str"], ["count", "int"], ["radius", "int"]] },
   { name: "poi", geometry: "point", fields: [["label", "str"]] },
@@ -87,18 +93,20 @@ export const KINDS = [
   { name: "route", geometry: "line", fields: [["label", "str"]] },
   { name: "note", geometry: "point", fields: [["text", "str"]] },
   // map things: ropes, holes and portals lead somewhere (an optional destination, on any floor)
-  { name: "rope", geometry: "pointdest", fields: [["label", "str"]] },
-  { name: "lever", geometry: "point", fields: [["label", "str"]] },
-  { name: "hole", geometry: "pointdest", fields: [["label", "str"]] },
+  { name: "rope", geometry: "pointdest", fields: [["label", "str"]], extra: COMBAT },
+  { name: "lever", geometry: "point", fields: [["label", "str"]], extra: COMBAT },
+  { name: "hole", geometry: "pointdest", fields: [["label", "str"]], extra: COMBAT },
   { name: "door", geometry: "point", fields: [["label", "str"]] },
-  { name: "portal", geometry: "pointdest", fields: [["label", "str"]] },
-  { name: "elevator", geometry: "pointdest", fields: [["label", "str"]] },
+  { name: "portal", geometry: "pointdest", fields: [["label", "str"]], extra: COMBAT },
+  { name: "elevator", geometry: "pointdest", fields: [["label", "str"]], extra: COMBAT },
   // from CORE_KINDS on: each one a length and a format-1 body (a page from before keeps it as raw bytes)
-  { name: "rope2", geometry: "pointdest", fields: [["label", "str"]] },   // a two-way rope: goes and comes back
+  { name: "rope2", geometry: "pointdest", fields: [["label", "str"]], extra: COMBAT },   // a two-way rope: goes and comes back
   { name: "boss", geometry: "point", fields: [["monster", "str"], ["schedule", "str"], ["label", "str"]] },
   { name: "npc", geometry: "point", fields: [["name", "str"], ["schedule", "str"], ["label", "str"]] },
 ];
 export const KIND_CODE = Object.fromEntries(KINDS.map((k, i) => [k.name, i]));
+// a kind's fields, then its extra ones (format 1 keys them in this order)
+export const allFields = (k) => (k.extra ? [...k.fields, ...k.extra] : k.fields);
 
 export class LinkError extends Error {}
 
@@ -226,7 +234,7 @@ function bodyOf(m) {
     for (const [z, x0, n] of runs) { w.s(z - pz); w.s(x0 - px); w.u(n - 1); pz = z; px = x0; }
   }
   const fields = m.fields || {};
-  k.fields.forEach(([name, typ], i) => {
+  allFields(k).forEach(([name, typ], i) => {
     const v = fields[name];
     if (v == null || v === "") return;
     if (typ === "int") { w.u(i * 2); w.s(v); } else { w.u(i * 2 + 1); w.str(v); }
@@ -296,7 +304,8 @@ function readBody(m, code, body, budget) {
   while (!b.done()) {
     const key = b.u(), i = Math.floor(key / 2), typ = key % 2;
     const v = typ ? b.str() : b.s();
-    if (i < k.fields.length && (k.fields[i][1] === "str") === !!typ) fields[k.fields[i][0]] = v;
+    const every = allFields(k);
+    if (i < every.length && (every[i][1] === "str") === !!typ) fields[every[i][0]] = v;
   }
   m.fields = fields;
   return m;
@@ -600,6 +609,22 @@ function writeRecord(w, m, c, slots) {
   });
 }
 
+// [[key, type, value]] of a core-kind marker's extra fields that are set (format 2's extra section)
+function extrasOf(m) {
+  const code = KIND_CODE[m.kind];
+  if (code == null || code >= CORE_KINDS) return [];
+  const k = KINDS[code], fields = m.fields || {};
+  return (k.extra || []).map(([name, typ], j) => [(k.fields.length + j) * 2 + (typ === "str" ? 1 : 0), typ, fields[name]])
+    .filter(([, , v]) => v != null && v !== "");
+}
+
+// a core-kind record's extra section (link flag 1): g(n + 1), each g(key + 1) and z_1(v) or a string
+function writeExtras(w, m, slots) {
+  const ex = extrasOf(m);
+  w.gamma(ex.length + 1);
+  for (const [key, typ, v] of ex) { w.gamma(key + 1); if (typ === "int") w.sg(int(v), K_INT); else slots.push(v); }
+}
+
 // slots: [fields, name] the strings after the records go to, in order ([null] for a field this page drops)
 function readRecord(r, c, slots, budget, extra) {
   const code = r.bit() ? c.kind : r.gamma() - 1;
@@ -653,10 +678,16 @@ function readRecord(r, c, slots, budget, extra) {
       fields[name] = monsterName(c.mon);
     } else { fields[name] = ""; slots.push([fields, name]); }
   });
-  if (extra) {   // fields a newer page added to this kind: read past them
+  if (extra) {   // fields added to this kind later (its extra; a newer page's unknown ones are read past and dropped)
     const n = r.gamma() - 1;
     if (n > 64) throw new LinkError("bad link data");
-    for (let i = 0; i < n; i++) { if ((r.gamma() - 1) % 2) slots.push([null]); else r.sg(K_INT); }
+    for (let i = 0; i < n; i++) {
+      const key = r.gamma() - 1, j = Math.floor(key / 2) - k.fields.length, typ = key % 2;
+      const def = j >= 0 ? (k.extra || [])[j] : null;
+      const name = def && (def[1] === "str") === !!typ ? def[0] : null;
+      if (typ) { if (name) fields[name] = ""; slots.push(name ? [fields, name] : [null]); }
+      else { const v = r.sg(K_INT); if (name) fields[name] = v; }
+    }
   }
   m.fields = fields;
   return m;
@@ -684,11 +715,15 @@ function partsOf(state) {
   const [markers, was, vx, vz] = header(w, state, 2);
   w.u(markers.length);
   w.u(was.length);
-  w.u(0);   // link flags
+  const ext = [...markers, ...was].some((m) => extrasOf(m).length);
+  w.u(ext ? 1 : 0);   // link flags (1: records end with extra fields; none set: 0, the link as before)
   const bits = new BitWriter(), slots = [];
   for (const group of [markers, was]) {
     const c = context(vx, vz);
-    for (const m of group) writeRecord(bits, m, c, slots);
+    for (const m of group) {
+      writeRecord(bits, m, c, slots);
+      if (ext && (KIND_CODE[m.kind] ?? CORE_KINDS) < CORE_KINDS) writeExtras(bits, m, slots);
+    }
   }
   for (const byte of bits.out()) w.b.push(byte);
   const t = new Writer();
