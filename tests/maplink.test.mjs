@@ -1,7 +1,7 @@
 // node --test tests/
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { encode, decode, changes, saveState, runsOf, floorCode, floorOf, LinkError, KINDS } from "../maplink.js";
+import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, LinkError, KINDS } from "../maplink.js";
 
 const sample = {
   tiles: "0.2.1",
@@ -50,6 +50,31 @@ test("save records added, moved, edited, removed against the opened link", async
   // saving the saved link again unchanged: no changes
   const again = await decode(await encode(saveState(saved, saved.markers, saved.view, saved.tiles, saved.next)));
   assert.deepEqual(changes(again), []);
+});
+
+test("a saved link rebuilds the link it came from: a second save keeps the first round's changes", async () => {
+  const opened = await decode(await encode(sample));
+  const markers = structuredClone(opened.markers);
+  markers[1].fields.label = "saída";
+  markers.splice(3, 1);
+  markers.push({ id: 5, kind: "note", floor: "s", locked: false, x: 3, z: 3, fields: { text: "new" } });
+  const first = await decode(await encode(saveState(opened, markers, opened.view, opened.tiles, 6)));
+  const base = baselineOf(first);
+  assert.deepEqual(base.markers, opened.markers);
+  assert.equal(base.next, 5);
+  // reload, move the new note, save again: still every change against the original
+  const again = structuredClone(first.markers);
+  again.find((m) => m.id === 5).x = 4;
+  const second = await decode(await encode(saveState(base, again, first.view, first.tiles, first.next)));
+  assert.deepEqual(changes(second).map((c) => c.op + "#" + c.id), ["edited#1", "removed#3", "added#5"]);
+});
+
+test("a short link can't declare millions of cells", async () => {
+  // 1000 markers of 40000 cells each, a few hundred bytes deflated
+  const big = { view: { floors: ["s"] }, markers: [] };
+  const row = Array.from({ length: 200 }, (_, x) => [x, 0]);
+  for (let i = 0; i < 400; i++) big.markers.push({ id: i, kind: "area", floor: "s", cells: row, fields: {} });
+  await assert.rejects(decode(await encode(big)), /too large/);
 });
 
 test("an unknown kind survives unchanged", async () => {

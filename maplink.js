@@ -22,6 +22,7 @@ export const MAX_TEXT = 300;
 export const MAX_MARKERS = 1000;
 export const MAX_POINTS = 2000;
 export const MAX_CELLS = 40000;
+export const MAX_TOTAL = 60000;   // cells and route points of the whole link, markers and was together
 
 // Marker kinds by code: append only, a code is never reused.
 export const KINDS = [
@@ -174,7 +175,10 @@ function writeMarker(w, m) {
   w.bytes(body);
 }
 
-function readMarker(r) {
+// budget: {left: cells and route points for the whole link}: runs expand after inflating, so a short link could declare
+// millions of cells without it
+function readMarker(r, budget = { left: MAX_TOTAL }) {
+  const spend = (n) => { budget.left -= n; if (budget.left < 0) throw new LinkError("link too large"); };
   const code = r.u(), id = r.u(), flags = r.u(), floor = floorOf(r.u());
   const body = r.raw(r.u());
   const m = { id, floor, locked: !!(flags & 1) };
@@ -186,6 +190,7 @@ function readMarker(r) {
   else if (k.geometry === "line") {
     const n = b.u();
     if (n > MAX_POINTS) throw new LinkError("route too long");
+    spend(n);
     const pts = [];
     let x = 0, z = 0;
     for (let i = 0; i < n; i++) { x += b.s(); z += b.s(); pts.push([x, z]); }
@@ -199,6 +204,7 @@ function readMarker(r) {
       z += b.s(); x0 += b.s();
       const len = b.u() + 1;
       if (cells.length + len > MAX_CELLS) throw new LinkError("area too large");
+      spend(len);
       for (let x = x0; x < x0 + len; x++) cells.push([x, z]);
     }
     m.cells = cells;
@@ -282,12 +288,12 @@ export async function decode(text) {
   view.floors = [];
   for (let i = 0; i < panes; i++) view.floors.push(floorOf(r.u()));
   const base = r.u(), next = r.u();
-  const groups = [];
+  const groups = [], budget = { left: MAX_TOTAL };
   for (let g = 0; g < 2; g++) {
     const n = r.u();
     if (n > MAX_MARKERS) throw new LinkError("too many markers");
     const list = [];
-    for (let i = 0; i < n; i++) list.push(readMarker(r));
+    for (let i = 0; i < n; i++) list.push(readMarker(r, budget));
     groups.push(list);
   }
   return { format: version, tiles, view, base, next, markers: groups[0], was: groups[1] };
@@ -353,6 +359,19 @@ export function changes(state) {
     if (!!a.locked !== !!b.locked) out.push({ op: b.locked ? "locked" : "unlocked", id, kind: b.kind });
   }
   return out;
+}
+
+// The link a saved link was made from, rebuilt from its own `was` and `base`: the markers below base as they were, the
+// removed ones back, none of the added. A player who saved, reloaded (the address bar holds the saved link) and saves
+// again still gets every change against the link staff sent, not only the ones since the reload.
+export function baselineOf(state) {
+  const base = state.base || 0;
+  const was = new Map((state.was || []).map((m) => [m.id, m]));
+  const now = new Set((state.markers || []).map((m) => m.id));
+  const markers = (state.markers || []).filter((m) => m.id < base).map((m) => was.get(m.id) || m);
+  for (const m of state.was || []) if (!now.has(m.id)) markers.push(m);
+  markers.sort((a, b) => a.id - b.id);
+  return { ...state, markers, was: [], next: base };
 }
 
 // The state to save: the markers now, against the markers of the link the page opened with (opened: its decoded state).

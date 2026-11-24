@@ -11,7 +11,7 @@ document.documentElement.lang = lang;
 document.title = t("title");
 
 // The marker kinds on the page: maplink.js KINDS holds the format; this table how each one looks and is edited.
-// A new kind: append it to KINDS (maplink.js and the staff tools' maplink.py), here, and its words in i18n.js.
+// A new kind: append it to KINDS (maplink.js and its other implementations), here, and its words in i18n.js.
 const KIND_UI = {
   spawn: { color: "#e5484d", glyph: "⚔", fields: { monster: { input: "monster" }, count: { input: "int", min: 1, max: 99, def: 1 }, radius: { input: "int", min: 0, max: 40, def: 3 } } },
   poi: { color: "#f5a524", glyph: "★", fields: { label: { input: "text" } } },
@@ -652,7 +652,9 @@ async function start() {
   tileMeta = await (await fetch(`tiles/${tileVersion}/meta.json`)).json();
   let view = { x: 0, z: 0, zoom: -1, floors: ["s"] };
   if (state) {
-    opened = state;
+    // a player's Save always compares with the link staff sent (rebuilt from the saved link's own change list, so a
+    // reload after a Save loses nothing); staff (?staff=1) start a new round from the link as it is
+    opened = STAFF ? state : ML.baselineOf(state);
     markers = clone(state.markers);
     nextId = state.next;
     view = state.view;
