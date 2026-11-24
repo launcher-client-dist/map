@@ -1,0 +1,138 @@
+// The page's words in pt, en, es and zh. A missing key falls back to English. {0}, {1}: values.
+export const LANGS = ["pt", "en", "es", "zh"];
+
+const W = {
+  en: {
+    title: "Opengea Map",
+    surface: "Surface", floor: "Floor {0}", floorY: "Floor {0} (y {1})",
+    panes: "Floors side by side", lang: "Language",
+    "tool.select": "Select", "tool.spawn": "Monster spawn", "tool.poi": "Point", "tool.area": "Area", "tool.route": "Route",
+    "tool.note": "Note",
+    "kind.spawn": "Monster spawn", "kind.poi": "Point of interest", "kind.area": "Area", "kind.route": "Route", "kind.note": "Note",
+    "field.monster": "Monster", "field.count": "How many", "field.radius": "Radius (cells)", "field.label": "Name",
+    "field.text": "Text", "field.floor": "Floor",
+    brush: "Brush", rect: "Rectangle", erase: "Erase", newArea: "New area", finish: "Finish", cancel: "Cancel",
+    undo: "Undo", redo: "Redo", save: "Save", del: "Delete", close: "Close", lock: "Locked (shown, can't be changed)",
+    locked: "Context marker: it can't be moved or changed.",
+    copied: "Copied: {0}", copyLink: "Copy link", copyAll: "Copy message", copyFail: "Select the text and copy it.",
+    saveTitle: "Your link", saveHelp: "Post this in your ticket on Discord.",
+    changesN: "Map: {0} changes", changes1: "Map: 1 change", noChanges: "Map: no changes",
+    more: "… and {0} more",
+    long: "Long message ({0} characters): if Discord refuses it, send the link alone.",
+    added: "added", moved: "moved", edited: "edited", removed: "removed", lockedOp: "locked", unlockedOp: "unlocked",
+    at: "at",
+    linkChanges: "This link has {0} changes from its previous version.", view: "View",
+    badLink: "This link could not be opened: {0}",
+    oldTiles: "This link was made on map {0}, which is no longer here: showing the newest map.",
+    hintArea: "Drag to paint cells. Two fingers move the map.",
+    hintRoute: "Tap to add points, then Finish.",
+    hintPlace: "Tap the map to place it.",
+    cells: "{0} cells", points: "{0} points",
+    unknownKind: "A marker this page doesn't know (kept as it is).",
+  },
+  pt: {
+    title: "Mapa do Opengea",
+    surface: "Superfície", floor: "Andar {0}", floorY: "Andar {0} (y {1})",
+    panes: "Andares lado a lado", lang: "Idioma",
+    "tool.select": "Selecionar", "tool.spawn": "Spawn de monstro", "tool.poi": "Ponto", "tool.area": "Área",
+    "tool.route": "Rota", "tool.note": "Nota",
+    "kind.spawn": "Spawn de monstro", "kind.poi": "Ponto de interesse", "kind.area": "Área", "kind.route": "Rota",
+    "kind.note": "Nota",
+    "field.monster": "Monstro", "field.count": "Quantos", "field.radius": "Raio (quadrados)", "field.label": "Nome",
+    "field.text": "Texto", "field.floor": "Andar",
+    brush: "Pincel", rect: "Retângulo", erase: "Apagar", newArea: "Nova área", finish: "Concluir", cancel: "Cancelar",
+    undo: "Desfazer", redo: "Refazer", save: "Salvar", del: "Excluir", close: "Fechar",
+    lock: "Travado (aparece, não pode mudar)",
+    locked: "Marcador de contexto: não pode ser movido nem alterado.",
+    copied: "Copiado: {0}", copyLink: "Copiar link", copyAll: "Copiar mensagem", copyFail: "Selecione o texto e copie.",
+    saveTitle: "Seu link", saveHelp: "Mande isto no seu ticket no Discord.",
+    changesN: "Mapa: {0} alterações", changes1: "Mapa: 1 alteração", noChanges: "Mapa: sem alterações",
+    more: "… e mais {0}",
+    long: "Mensagem longa ({0} caracteres): se o Discord recusar, mande só o link.",
+    added: "adicionado", moved: "movido", edited: "editado", removed: "removido", lockedOp: "travado",
+    unlockedOp: "destravado", at: "em",
+    linkChanges: "Este link tem {0} alterações em relação à versão anterior.", view: "Ver",
+    badLink: "Não deu pra abrir este link: {0}",
+    oldTiles: "Este link foi feito no mapa {0}, que não está mais aqui: mostrando o mapa mais novo.",
+    hintArea: "Arraste para pintar quadrados. Dois dedos movem o mapa.",
+    hintRoute: "Toque para pôr pontos, depois Concluir.",
+    hintPlace: "Toque no mapa para colocar.",
+    cells: "{0} quadrados", points: "{0} pontos",
+    unknownKind: "Um marcador que esta página não conhece (mantido como está).",
+  },
+  es: {
+    title: "Mapa de Opengea",
+    surface: "Superficie", floor: "Piso {0}", floorY: "Piso {0} (y {1})",
+    panes: "Pisos lado a lado", lang: "Idioma",
+    "tool.select": "Seleccionar", "tool.spawn": "Spawn de monstruo", "tool.poi": "Punto", "tool.area": "Área",
+    "tool.route": "Ruta", "tool.note": "Nota",
+    "kind.spawn": "Spawn de monstruo", "kind.poi": "Punto de interés", "kind.area": "Área", "kind.route": "Ruta",
+    "kind.note": "Nota",
+    "field.monster": "Monstruo", "field.count": "Cuántos", "field.radius": "Radio (casillas)", "field.label": "Nombre",
+    "field.text": "Texto", "field.floor": "Piso",
+    brush: "Pincel", rect: "Rectángulo", erase: "Borrar", newArea: "Nueva área", finish: "Terminar",
+    cancel: "Cancelar", undo: "Deshacer", redo: "Rehacer", save: "Guardar", del: "Eliminar", close: "Cerrar",
+    lock: "Bloqueado (se ve, no se puede cambiar)",
+    locked: "Marcador de contexto: no se puede mover ni cambiar.",
+    copied: "Copiado: {0}", copyLink: "Copiar enlace", copyAll: "Copiar mensaje", copyFail: "Selecciona el texto y cópialo.",
+    saveTitle: "Tu enlace", saveHelp: "Publica esto en tu ticket de Discord.",
+    changesN: "Mapa: {0} cambios", changes1: "Mapa: 1 cambio", noChanges: "Mapa: sin cambios",
+    more: "… y {0} más",
+    long: "Mensaje largo ({0} caracteres): si Discord lo rechaza, envía solo el enlace.",
+    added: "añadido", moved: "movido", edited: "editado", removed: "eliminado", lockedOp: "bloqueado",
+    unlockedOp: "desbloqueado", at: "en",
+    linkChanges: "Este enlace tiene {0} cambios respecto a su versión anterior.", view: "Ver",
+    badLink: "No se pudo abrir este enlace: {0}",
+    oldTiles: "Este enlace se hizo en el mapa {0}, que ya no está: se muestra el mapa más nuevo.",
+    hintArea: "Arrastra para pintar casillas. Dos dedos mueven el mapa.",
+    hintRoute: "Toca para añadir puntos y luego Terminar.",
+    hintPlace: "Toca el mapa para colocarlo.",
+    cells: "{0} casillas", points: "{0} puntos",
+    unknownKind: "Un marcador que esta página no conoce (se mantiene igual).",
+  },
+  zh: {
+    title: "Opengea 地图",
+    surface: "地面", floor: "第 {0} 层", floorY: "第 {0} 层 (y {1})",
+    panes: "并排显示楼层", lang: "语言",
+    "tool.select": "选择", "tool.spawn": "怪物刷新点", "tool.poi": "地点", "tool.area": "区域", "tool.route": "路线",
+    "tool.note": "备注",
+    "kind.spawn": "怪物刷新点", "kind.poi": "兴趣点", "kind.area": "区域", "kind.route": "路线", "kind.note": "备注",
+    "field.monster": "怪物", "field.count": "数量", "field.radius": "半径（格）", "field.label": "名称", "field.text": "文字",
+    "field.floor": "楼层",
+    brush: "画笔", rect: "矩形", erase: "擦除", newArea: "新区域", finish: "完成", cancel: "取消",
+    undo: "撤销", redo: "重做", save: "保存", del: "删除", close: "关闭", lock: "已锁定（显示，不可修改）",
+    locked: "参考标记：不能移动或修改。",
+    copied: "已复制：{0}", copyLink: "复制链接", copyAll: "复制消息", copyFail: "请选中文字后复制。",
+    saveTitle: "你的链接", saveHelp: "把它发到你在 Discord 的工单里。",
+    changesN: "地图：{0} 处修改", changes1: "地图：1 处修改", noChanges: "地图：没有修改",
+    more: "……还有 {0} 处",
+    long: "消息较长（{0} 个字符）：如果 Discord 拒绝，只发送链接。",
+    added: "已添加", moved: "已移动", edited: "已编辑", removed: "已删除", lockedOp: "已锁定", unlockedOp: "已解锁",
+    at: "位于",
+    linkChanges: "此链接相对上一版本有 {0} 处修改。", view: "查看",
+    badLink: "无法打开此链接：{0}",
+    oldTiles: "此链接基于地图 {0}，该版本已不在：显示最新地图。",
+    hintArea: "拖动以涂色格子。双指移动地图。",
+    hintRoute: "点击添加路线点，然后点完成。",
+    hintPlace: "点击地图放置。",
+    cells: "{0} 格", points: "{0} 个点",
+    unknownKind: "此页面不认识的标记（保持原样）。",
+  },
+};
+
+export function pickLang() {
+  const q = new URLSearchParams(location.search).get("lang");
+  if (LANGS.includes(q)) return q;
+  for (const l of navigator.languages || [navigator.language || "en"]) {
+    const p = String(l).slice(0, 2).toLowerCase();
+    if (LANGS.includes(p)) return p;
+  }
+  return "en";
+}
+
+export function translator(lang) {
+  return (key, ...args) => {
+    const s = (W[lang] && W[lang][key]) ?? W.en[key] ?? key;
+    return s.replace(/\{(\d)\}/g, (_, i) => String(args[+i] ?? ""));
+  };
+}
