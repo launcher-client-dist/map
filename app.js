@@ -236,6 +236,61 @@ function tileLayer(floor, opacity = 1) {
   });
 }
 
+// ---- "Can't walk here" (reach/<version>/, the staff tools' map_reach.py): over each floor's picture, the cells a
+// player can't stand on (rocks, walls, props that block, void: dark) and the closed places (ground with no walk, rope,
+// portal or ladder in from open ground on today's map: pink). Zoom-0 tiles only (the page scales them); loaded the
+// first time the layer is turned on; this browser remembers the switch.
+let reachOn = pref.get("reach") === "1", reachMeta = null, reachVer = null, reachLoading = null;
+const ReachLayer = L.TileLayer.extend({
+  getTileUrl(c) {
+    const have = reachMeta && reachMeta.tiles[this.options.floor];
+    if (!have || !have.includes(c.x + "_" + c.y)) return BLANK;
+    return `reach/${reachVer}/${this.options.floor}/${c.x}_${c.y}.png`;
+  },
+});
+function loadReach() {
+  // this link's map version, else the newest (the walk data is today's world either way)
+  reachLoading ||= (async () => {
+    for (const v of new Set([tileVersion, tileIndex.latest])) {
+      try {
+        const r = await fetch(`reach/${v}/meta.json`);
+        if (r.ok) { reachMeta = await r.json(); reachVer = v; return; }
+      } catch { /* offline, or no layer for this version */ }
+    }
+    reachMeta = false;
+  })();
+  return reachLoading;
+}
+function paintReach(p) {
+  if (p.reach) { p.map.removeLayer(p.reach); p.reach = null; }
+  if (!reachOn || !reachMeta) return;
+  p.reach = new ReachLayer("", { floor: p.floor, tileSize: 256, minZoom: -2, maxZoom: 5, minNativeZoom: 0, maxNativeZoom: 0,
+    noWrap: true, bounds: L.latLngBounds(tileMeta.bounds), keepBuffer: 4, zIndex: 5, className: "reach" }).addTo(p.map);
+}
+async function setReach(on) {
+  reachOn = on;
+  pref.set("reach", on ? "1" : "0");
+  if (on) await loadReach();
+  for (const p of panes) paintReach(p);
+  paintReachCtl();
+}
+// the switch (the float over the maps; the phone's More menu) and, when on, its key and the data's date
+const reachToggle = () => el("button", { type: "button", class: "tgl", "data-reach": "1", "aria-pressed": "false", title: t("reachHelp"),
+  onclick: () => setReach(!reachOn) }, el("span", { class: "sw" }), t("reach"));
+const reachKey = () => el("span", { class: "reachKey", hidden: true },
+  el("span", {}, el("i", { class: "k blocked" }), t("reachBlocked")), el("span", {}, el("i", { class: "k closed" }), t("reachClosed")),
+  el("small", { class: "made" }));
+function paintReachCtl() {
+  for (const b of document.querySelectorAll("[data-reach]")) {
+    b.classList.toggle("on", reachOn);
+    b.setAttribute("aria-pressed", String(reachOn));
+  }
+  for (const k of document.querySelectorAll(".reachKey")) {
+    k.hidden = !reachOn || reachMeta === null;
+    k.querySelector(".made").textContent = reachMeta ? t("reachMade", reachMeta.made) : reachMeta === false ? t("reachNone") : "";
+  }
+}
+
 // ------------------------------------------------------------------------------------------------ panes
 function buildPanes(floors, view) {
   for (const p of panes) p.map.remove();
@@ -324,6 +379,7 @@ function setFloor(p, floor) {
   if (p.under) p.map.removeLayer(p.under);
   p.under = floor === "s" ? null : tileLayer("s", 0.14).addTo(p.map);   // the surface, dim, under a floor below it
   p.base = tileLayer(floor).addTo(p.map);
+  paintReach(p);
   p.layer.bringToFront?.();
   paintFloorNav(p);
 }
@@ -454,11 +510,33 @@ const isSel = (m) => m.id === selected || multi.has(m.id);
 // Revisar: what changed against the link this one was saved from ("new", "edited"; null: the same, or not reviewing)
 const rvStatus = (m) => (mode === "review" ? reviewDiff().status.get(m.id) || null : null);
 function icon(m, extra = "") {
-  const k = ui(m), size = BIG[m.kind] || 26, color = colorOf(m), rv = rvStatus(m);
-  const cls = "mk" + (BIG[m.kind] ? " " + m.kind : "") + (isSel(m) ? " sel" : "") + (m.locked ? " lock" : "") + (rv ? " rv-" + rv : "") + extra;
+  const k = ui(m), size = BIG[m.kind] || 26, color = colorOf(m), rv = rvStatus(m), flag = !!m.fields?.[ML.FLAG];
+  const cls = "mk" + (BIG[m.kind] ? " " + m.kind : "") + (isSel(m) ? " sel" : "") + (m.locked ? " lock" : "") + (rv ? " rv-" + rv : "") + (flag ? " flag" : "") + extra;
   // static glyphs only: no text from the link in this HTML
   return L.divIcon({ className: "", iconSize: [size, size], iconAnchor: [size / 2, size / 2],
-    html: `<div class="${cls}" style="background:${color};--ring:${color}">${m.locked ? "🔒" : k.svg || k.glyph}${m.fields?.combat ? '<span class="badge cb">⚔</span>' : ""}${countBadge(m)}${m.fields?.note ? '<span class="badge nt">✎</span>' : ""}</div>` });
+    html: `<div class="${cls}" style="background:${color};--ring:${color}">${m.locked ? "🔒" : k.svg || k.glyph}${m.fields?.combat ? '<span class="badge cb">⚔</span>' : ""}${countBadge(m)}${m.fields?.note ? '<span class="badge nt">✎</span>' : ""}${flag ? '<span class="badge fg">!</span>' : ""}</div>` });
+}
+
+// ---- a reviewer's flag (maplink.js FLAG: a problem to fix, in words): a red ring on the marker, its words under its
+// label (always shown), at the top of its panel, and in Review's Problems list
+const FLAG_RED = "#ff3b3b";
+const flagOf = (m) => m.fields?.[ML.FLAG] || "";
+// a label (text or a node) with the flag's words on a line under it (text only: someone typed them)
+function withFlag(m, content) {
+  const f = flagOf(m);
+  if (!f) return content;
+  const out = el("span", {}, content instanceof Node ? content : content || t("kind." + m.kind));
+  out.append(el("br"), el("small", { class: "flagtxt" }, "⚠ " + f));
+  return out;
+}
+function setFlag(id, val) {
+  commit(() => {
+    const n = byId(id);
+    if (!n || mode !== "edit" || !(canEdit(n) || STAFF)) return false;
+    const v = String(val ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, ML.MAX_TEXT);
+    if ((n.fields[ML.FLAG] ?? "") === v) return false;
+    if (v) n.fields[ML.FLAG] = v; else delete n.fields[ML.FLAG];
+  });
 }
 // a spawn of more than one monster: ×N on its corner (a number only: nothing typed goes into this HTML)
 function countBadge(m) {
@@ -654,33 +732,35 @@ function drawMarker(p, m) {
     });
     const label = labelOf(m), d = destOf(m), away = d && d.floor !== m.floor ? leadsText(d.floor) : "";
     const text = [label, away, m.fields?.combat ? "⚔ " + t("combatOn") : ""].filter(Boolean).join(" · ");
-    const permanent = labelShown(p, m);
-    if (m.kind === "boss" || m.kind === "npc") tip(mk, whoWhen(m), { permanent, ...(BIG[m.kind] ? { offset: [0, -18] } : {}) });
-    else if (m.kind === "spawn" && m.fields?.note) tip(mk, spawnLabel(m), { permanent });
-    else tip(mk, m.kind === "rope2" ? ("↔ " + text).trim() : text, { permanent });   // a two-way rope: ↔ always
+    const permanent = labelShown(p, m) || !!flagOf(m);   // a flagged one's words stay on the map
+    if (m.kind === "boss" || m.kind === "npc") tip(mk, withFlag(m, whoWhen(m)), { permanent, ...(BIG[m.kind] ? { offset: [0, -18] } : {}) });
+    else if (m.kind === "spawn" && m.fields?.note) tip(mk, withFlag(m, spawnLabel(m)), { permanent });
+    else tip(mk, withFlag(m, m.kind === "rope2" ? ("↔ " + text).trim() : text), { permanent });   // a two-way rope: ↔ always
     mk.addTo(p.layer);
     return;
   }
   if (m.cells) {
     const style = { color: k.color, weight: 0, fillOpacity: sel ? 0.45 : 0.3, interactive: tool === "select" || tool === "walls" || tool === "movegroup" };
     const poly = L.polygon(rings(m.cells), style).on("click", pick).addTo(p.layer);
-    const edge = sel ? "#ffe066" : rv ? RV_COLOR[rv] : k.color;
-    L.polyline(outline(m.cells), { color: edge, weight: sel || rv ? 3 : 2, dashArray: m.locked ? "4 4" : null, interactive: false }).addTo(p.layer);
+    const flagged = !!flagOf(m), edge = sel ? "#ffe066" : flagged ? FLAG_RED : rv ? RV_COLOR[rv] : k.color;
+    L.polyline(outline(m.cells), { color: edge, weight: sel || rv || flagged ? 3 : 2, dashArray: m.locked ? "4 4" : null, interactive: false }).addTo(p.layer);
     const c = ML.where(m);
-    if (c && labelOf(m) && labelShown(p, m)) {
+    if (c && (labelOf(m) || flagged) && (labelShown(p, m) || flagged)) {
       const anchor = L.marker(ll(c[0], c[1]), { icon: L.divIcon({ className: "", iconSize: [0, 0] }), interactive: false }).addTo(p.layer);
-      tip(anchor, (m.locked ? "🔒 " : "") + labelOf(m), { offset: [0, 0], direction: "center" });
+      tip(anchor, withFlag(m, (m.locked ? "🔒 " : "") + labelOf(m)), { offset: [0, 0], direction: "center" });
     } else if (labelOf(m)) tip(poly, (m.locked ? "🔒 " : "") + labelOf(m), { permanent: false, sticky: true, offset: [0, -10] });
     if (m.id === selected && !multi.size && canEdit(m)) moveHandle(p, m);
     return poly;
   }
   if (m.points) {
-    const line = L.polyline(m.points.map(([x, z]) => ll(x, z)), { color: sel ? "#ffe066" : rv ? RV_COLOR[rv] : k.color, weight: sel || rv ? 5 : 4,
+    const flagged = !!flagOf(m);
+    const line = L.polyline(m.points.map(([x, z]) => ll(x, z)), { color: sel ? "#ffe066" : flagged ? FLAG_RED : rv ? RV_COLOR[rv] : k.color, weight: sel || rv || flagged ? 5 : 4,
       dashArray: m.locked ? "6 6" : null, interactive: tool === "select" || tool === "movegroup" }).on("click", pick).addTo(p.layer);
     const [x1, z1] = m.points[m.points.length - 1];
     L.circleMarker(ll(m.points[0][0], m.points[0][1]), { radius: 5, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
     L.circleMarker(ll(x1, z1), { radius: 7, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
-    if (labelOf(m)) tip(line, (m.locked ? "🔒 " : "") + labelOf(m), { direction: "center", offset: [0, 0], permanent: labelShown(p, m), sticky: !labelShown(p, m) });
+    const shown = labelShown(p, m) || flagged;
+    if (labelOf(m) || flagged) tip(line, withFlag(m, (m.locked ? "🔒 " : "") + labelOf(m)), { direction: "center", offset: [0, 0], permanent: shown, sticky: !shown });
     if (m.id === selected && !multi.size && canEdit(m)) {
       m.points.forEach(([x, z], i) => {
         const h = L.marker(ll(x, z), { draggable: true, icon: L.divIcon({ className: "", html: '<div class="handle"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }) });
@@ -983,6 +1063,7 @@ function buildMenus() {
   }
   more.append(el("div", { class: "menu-sets" },
     el("div", { class: "set" }, el("span", {}, t("labels")), labelsSeg()),
+    el("div", { class: "set col" }, reachToggle(), reachKey()),
     el("div", { class: "set" }, el("span", {}, t("sideBySide")), panesSeg()),
     el("div", { class: "set" }, el("span", {}, t("modeWord")), modeSeg()),
     el("div", { class: "set" },
@@ -1233,6 +1314,11 @@ function renderPanel() {
   }
   const body = el("div", { class: "body" });
   panel.append(body);
+  // a reviewer's flag: what to fix here; whoever can change the marker marks it done (the flag goes, not the marker)
+  if (flagOf(m)) {
+    body.append(el("div", { class: "flagbox", role: "note" }, el("b", {}, "⚠ " + t("flagWord")), el("span", {}, flagOf(m)),
+      mode === "edit" && (editable || STAFF) ? el("button", { type: "button", "data-act": "flag-done", title: t("flagDoneHelp"), onclick: () => setFlag(m.id, "") }, "✓ " + t("flagDone")) : null));
+  }
   if (mode === "review") reviewNote(body, m);
   if (!(m.kind in KIND_UI)) body.append(el("div", { class: "note" }, t("unknownKind")));
   else if (m.locked) body.append(el("div", { class: "note" }, "🔒 " + t("locked")));
@@ -1274,6 +1360,11 @@ function renderPanel() {
     box.checked = !!m.locked;
     box.addEventListener("change", () => commit(() => { byId(m.id).locked = box.checked; }));
     body.append(el("label", { class: "check" }, box, t("lock")));
+    // staff mark a problem for the map's owner (the same field the staff tools' "maplink.py flag" writes)
+    const fl = el("input", { type: "text", maxlength: ML.MAX_TEXT, disabled: mode !== "edit", autocomplete: "off", placeholder: t("flagPlaceholder"), "data-act": "flag-text" });
+    fl.value = flagOf(m);
+    fl.addEventListener("change", () => setFlag(m.id, fl.value));
+    body.append(el("label", {}, t("flagStaff")), fl);
   }
   panel.append(el("div", { class: "ft" },
     mode === "edit" && m.kind in KIND_UI ? el("button", { type: "button", "data-act": "duplicate", title: t("dupHelp"), onclick: duplicateSel }, "⧉ " + t("dup")) : null,
@@ -1993,6 +2084,7 @@ function buildFrame() {
     el("div", { id: "subtools", hidden: true }),
     el("div", { id: "diffBar", class: "float", hidden: true, role: "status" }),
     el("div", { id: "floorCard", role: "region", "aria-label": t("floorsWord") }),
+    el("div", { id: "reachCtl", class: "float" }, reachToggle(), reachKey()),
     el("div", { id: "labelsCtl", class: "float" }, el("span", {}, t("labels") + ":"), labelsSeg()));
   const status = el("footer", { id: "coords" },
     el("button", { type: "button", id: "cur", disabled: true, title: t("statusCopy"), onclick: () => lastCell && copy(posLine(lastCell.x, lastCell.z, lastCell.floor)) }, "x · z"),
@@ -2124,6 +2216,17 @@ function summaryPanel(panel) {
   if (objects.length) {
     body.append(el("div", { class: "fl" }, el("span", {}, t("rv.objects"))));
     body.append(el("div", { class: "chips" }, objects.map(([k, c]) => el("span", { class: "chip" }, dotNode(k, "mk mini"), KIND_UI[k] ? t("kind." + k) : k, el("i", {}, String(c))))));
+  }
+  // a reviewer's flags: each problem, a click goes to its marker
+  const flags = ML.flagged(markers);
+  if (flags.length) {
+    body.append(el("div", { class: "fl" }, el("span", {}, t("rv.problems", flags.length))));
+    body.append(el("div", { class: "problems" }, flags.map((m) => {
+      const w = ML.where(m);
+      return el("button", { type: "button", class: "prob", "data-flag": m.id, onclick: () => w && goTo(w[0], w[1], m.floor, m.id) },
+        dotNode(m.kind in KIND_UI ? m.kind : "?", "mk mini"), el("span", { class: "pw" }, el("b", {}, flagOf(m)),
+          el("small", {}, [KIND_UI[m.kind] ? t("kind." + m.kind) : m.kind, labelOf(m), "#" + m.id, floorShort(m.floor)].filter(Boolean).join(" · "))));
+    })));
   }
   // before sending: what to look at, each with "show" (the next one on each click)
   body.append(el("div", { class: "fl" }, el("span", {}, t("rv.checks"))));
@@ -2580,6 +2683,13 @@ async function start() {
       el("button", { type: "button", "data-act": "draft-discard", onclick: () => { drafts.drop(draftKey); $("banner").hidden = true; toast(t("draftGone")); } }, t("draftDiscard"))));
   }
   buildPanes(view.floors, view);
+  if (reachOn) setReach(true); else paintReachCtl();
+  // a reviewer's flags (problems to fix): said at once, unless a draft is being offered
+  const flags = ML.flagged(markers);
+  if (flags.length && !offer) {
+    banner(t(flags.length === 1 ? "flagsBanner1" : "flagsBanner", flags.length), "flags",
+      el("button", { type: "button", "data-act": "flags-show", onclick: () => { $("banner").hidden = true; reviewTab = "summary"; setMode("review"); } }, t("flagsShow")));
+  }
   // read-only hooks for the page's browser tests
   Object.defineProperty(window, "__panes", { get: () => panes });   // the panes now (side by side rebuilds them)
   window.__state = () => ({ markers: clone(markers), nextId, selected, tool, destFor, multi: [...multi], stamp: { ...stamp }, mode, undo: undoStack.length });
