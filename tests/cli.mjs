@@ -1,6 +1,7 @@
 // For the cross tests of the staff tools: node tests/cli.mjs encode|decode|payload|payload1|changes|schedule|monsters, input on
 // stdin (payload: format 2's head + text; payload1: format 1's payload).
-import { encode, decode, payloadOf, changes } from "../maplink.js";
+import { encode, decode, payloadOf, changes, COLORS } from "../maplink.js";
+import { parseLever, leverText } from "../lever.js";
 import { MONSTERS } from "../monsters.js";
 import { translator } from "../i18n.js";
 import { scheduleText } from "../schedule.js";
@@ -17,4 +18,13 @@ else if (cmd === "schedule") {   // a list of schedule codes -> their words in p
   process.stdout.write(JSON.stringify(Object.fromEntries(["pt", "en"].map((l) => [l, codes.map((c) => scheduleText(c, translator(l)))]))));
 }
 else if (cmd === "monsters") process.stdout.write(JSON.stringify(MONSTERS));
-else { console.error("usage: node tests/cli.mjs encode|decode|payload|payload1|changes|schedule|monsters < input"); process.exit(2); }
+else if (cmd === "colors") process.stdout.write(JSON.stringify(COLORS));
+else if (cmd === "lever") {   // a list of [code, x, z] -> each one's words in pt and en, and its parsed form (maplink.py: the same)
+  const rows = JSON.parse(input);
+  const fw = { pt: (f) => (f === "s" ? "superfície" : "andar " + f), en: (f) => (f === "s" ? "surface" : "floor " + f) };
+  process.stdout.write(JSON.stringify({
+    parsed: rows.map(([c]) => parseLever(c)),
+    ...Object.fromEntries(["pt", "en"].map((l) => [l, rows.map(([c, x, z]) => leverText(c, translator(l), { x, z }, fw[l]))])),
+  }));
+}
+else { console.error("usage: node tests/cli.mjs encode|decode|payload|payload1|changes|schedule|monsters|colors|lever < input"); process.exit(2); }
