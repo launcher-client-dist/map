@@ -13,6 +13,15 @@ export function moved(m, dx, dz, dest = false) {
   return n;
 }
 
+// a marker on another floor: a destination on its own floor goes along (a portal to the next room), one on another
+// floor stays where it leads
+export function onFloor(m, floor) {
+  const n = structuredClone(m);
+  if (n.dest && n.dest.floor === m.floor) n.dest.floor = floor;
+  n.floor = floor;
+  return n;
+}
+
 // copies of the markers, by (dx, dz), with new ids from next: [copies, next after them]. A copied lever that opens a
 // copied area opens the copy. The copies are never locked (a context marker's copy is the proposer's own).
 export function duplicated(list, next, dx = 2, dz = -2) {

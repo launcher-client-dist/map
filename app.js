@@ -7,6 +7,9 @@ import { MONSTERS } from "./monsters.js";
 import { LANGS, pickLang, translator } from "./i18n.js";
 import { parseSchedule, scheduleCode, scheduleText } from "./schedule.js";
 import { BOSSES, bossOf } from "./bosses.js";
+import { parseLever, leverCode, leverText, wallCells, MAX_WALLS } from "./lever.js";
+import * as RV from "./review.js";
+import * as ED from "./edits.js";
 
 const lang = pickLang();
 const t = translator(lang);
@@ -24,17 +27,17 @@ const KIND_UI = {
   boss: { color: "#8e1b3b", svg: svg('<path d="M2.5 13.5h11"/><path d="M3.2 11 2 4.6l3.4 2.9L8 2.8l2.6 4.7L14 4.6 12.8 11Z"/>'),
     fields: { monster: { input: "boss" }, schedule: { input: "schedule" }, label: { input: "text", word: "field.bossLabel" } } },
   poi: { color: "#f5a524", glyph: "★", fields: { label: { input: "text" } } },
-  area: { color: "#30a46c", glyph: "▦", fields: { label: { input: "text" } } },
+  area: { color: "#30a46c", glyph: "▦", fields: { label: { input: "text" }, color: { input: "color" } } },
   route: { color: "#3e8ef7", glyph: "➜", fields: { label: { input: "text" } } },
   note: { color: "#a46cf5", glyph: "✎", fields: { text: { input: "longtext" } } },
   // map things (ropes, holes and portals lead somewhere: maplink.js's pointdest geometry)
   rope: { color: "#a86f3c", svg: svg('<path d="M8 1.5v2"/><circle cx="8" cy="5" r="1.5"/><path d="M8 6.5c-2.2 1.1-2.2 2.9 0 4s2.2 2.9 0 4"/>'), fields: { label: { input: "text" }, combat: { input: "check" } } },
   // a two-way rope (goes and comes back): the rope with an arrow up and one down; its line has a head at both ends
   rope2: { color: "#a86f3c", svg: svg('<path d="M8 1.5v2"/><circle cx="8" cy="5" r="1.5"/><path d="M8 6.5c-2.2 1.1-2.2 2.9 0 4s2.2 2.9 0 4"/><path d="M3 8V2.2M1.4 3.8 3 2.2l1.6 1.6M13 8v5.8M11.4 12.2 13 13.8l1.6-1.6" stroke-width="1.4"/>'), fields: { label: { input: "text" }, combat: { input: "check" } } },
-  lever: { color: "#d6409f", svg: svg('<path d="M2.5 13.5h11"/><path d="M5 13.5a3 3 0 0 1 6 0"/><path d="M8 11 11.2 4.2"/><circle cx="11.6" cy="3.4" r="1.6" fill="currentColor"/>'), fields: { label: { input: "text" }, combat: { input: "check" } } },
+  lever: { color: "#d6409f", svg: svg('<path d="M2.5 13.5h11"/><path d="M5 13.5a3 3 0 0 1 6 0"/><path d="M8 11 11.2 4.2"/><circle cx="11.6" cy="3.4" r="1.6" fill="currentColor"/>'), fields: { label: { input: "text" }, combat: { input: "check" }, pull: { input: "pull" } } },
   hole: { color: "#26292e", svg: svg('<path d="M8 1.5v4M6 3.8l2 2 2-2"/><ellipse cx="8" cy="10.5" rx="6" ry="3.5"/><ellipse cx="8" cy="11" rx="3.3" ry="1.7" fill="currentColor"/>'), fields: { label: { input: "text" }, combat: { input: "check" } } },
   door: { color: "#5b6b82", svg: svg('<path d="M4 14.5V3.5A1.5 1.5 0 0 1 5.5 2h5A1.5 1.5 0 0 1 12 3.5v11"/><path d="M2.5 14.5h11"/><circle cx="10" cy="8.8" r=".8" fill="currentColor"/>'), fields: { label: { input: "text" } } },
-  portal: { color: "#0fa3b8", svg: svg('<ellipse cx="8" cy="8" rx="4.6" ry="6.5"/><ellipse cx="8" cy="8" rx="2" ry="3.4"/><path d="M1.5 4.5l1 .6M14.5 11.5l-1-.6"/>'), fields: { label: { input: "text" }, combat: { input: "check" } } },
+  portal: { color: "#0fa3b8", svg: svg('<ellipse cx="8" cy="8" rx="4.6" ry="6.5"/><ellipse cx="8" cy="8" rx="2" ry="3.4"/><path d="M1.5 4.5l1 .6M14.5 11.5l-1-.6"/>'), fields: { label: { input: "text" }, combat: { input: "check" }, color: { input: "color" } } },
   elevator: { color: "#4c4fc9", svg: svg('<rect x="3" y="1.8" width="10" height="12.4" rx="1.6"/><path d="M8 3.9 10.3 6.6H5.7Z" fill="currentColor" stroke-width="1"/><path d="M8 12.1 5.7 9.4h4.6Z" fill="currentColor" stroke-width="1"/>'), fields: { label: { input: "text" }, combat: { input: "check" } } },
   // an NPC: who, when (free text) under the name, what it sells or does
   npc: { color: "#5e7d1f", svg: svg('<circle cx="8" cy="4.8" r="2.6"/><path d="M3 14.5c0-3 2.2-5.2 5-5.2s5 2.2 5 5.2"/>'),
@@ -59,6 +62,20 @@ const arrowOf = (m) => (m.kind === "rope2" ? "↔" : "→");
 const GLYPH = { select: "☝", legend: "?", things: "＋", more: "⋯", ...Object.fromEntries(Object.entries(KIND_UI).map(([k, v]) => [k, v.glyph])) };
 const UNKNOWN = { color: "#888", glyph: "?", fields: {} };
 const ui = (m) => KIND_UI[m.kind] || UNKNOWN;
+// the colours an area or a portal can wear (maplink.js COLORS: the index the link holds), and which each kind offers
+// (a portal: the game's purple, blue and red ones)
+const COLOR_HEX = ["", "#f5c518", "#30a46c", "#e93d82", "#e5484d", "#e6e8ec", "#3e8ef7", "#8e4ec6", "#f76b15"];
+const COLOR_CHOICES = { area: [0, 1, 2, 3, 4, 5, 6, 7, 8], portal: [0, 7, 6, 4] };
+// a marker's colour on the map: its own colour field, else its kind's
+const colorOf = (m) => COLOR_HEX[m.fields?.color] || ui(m).color;
+// where a lever sends the player ({x, z, floor} in cells), or null
+function leverTo(m) {
+  if (m.kind !== "lever") return null;
+  const p = parseLever(m.fields?.pull);
+  return p.act === "send" ? { x: m.x + p.to.dx, z: m.z + p.to.dz, floor: p.to.floor } : null;
+}
+// where a marker leads: a rope's, hole's or portal's destination, or the spot a lever sends to
+const destOf = (m) => m.dest || leverTo(m);
 // a kind whose marker can lead somewhere (rope, hole, portal)
 const leads = (kind) => ML.KINDS[ML.KIND_CODE[kind]]?.geometry === "pointdest";
 // the glyph of a kind or tool as a node: its SVG (static markup) or its text character
@@ -102,7 +119,21 @@ let selected = null;   // marker id
 let tool = "select";
 let areaMode = "brush";
 let draftRoute = null;   // {floor, points}
-let destFor = null;   // the "dest" tool: the id of the rope, hole or portal whose destination the next tap sets
+let destFor = null;   // the "dest" tool: the id of the rope, hole or portal whose destination the next tap sets;
+// "walls" (each tap adds or takes off a wall cell) and "pulldest" (the next tap: where it sends): the lever's id
+let destBack = null;   // the place tool to go back to once a destination is picked (stamp mode), else Select
+// several markers at once (Shift+click, Shift+drag): 2 or more act as a group (move, duplicate, to a floor, delete); the
+// "movegroup" tool: the next tap is where the group's middle goes
+const multi = new Set();
+// stamp mode: a place tool stays armed; a spawn's monster, count and radius carry over to the next one
+const stamp = { monster: "", count: 1, radius: 3 };
+let stampPlaced = 0;
+const pullPending = new Map();   // a lever's action picked in its panel but not set yet (walls with no cell): id -> act
+let linkState = null;   // the link the page opened (decoded): Revisar compares with the link it was saved from
+let baseMarkers = [];   // that link's markers (maplink.js baselineOf), what Revisar compares with
+let reviewOnly = false;   // Revisar: only the markers that changed
+let reviewTab = "summary";
+let warnAt = {};   // Revisar's checks: which of each check's markers "show" went to last
 let mapTitle = "";   // the map's title (the link's, else ?title=): the tab and the header show it
 let mode = "edit";   // "edit" or "review" (review: look only; what changed comes next round)
 let lastCell = null;   // {x, z, floor}: the cell under the cursor (or the last tap): the status bar copies its /pos
@@ -128,6 +159,8 @@ function snapshot() { return { markers: clone(markers), nextId, mapTitle }; }
 function restore(s) {
   markers = clone(s.markers); nextId = s.nextId;
   if (selected != null && !byId(selected)) selected = null;
+  for (const id of [...multi]) if (!byId(id)) multi.delete(id);
+  if (multi.size < 2) multi.clear();
   if (s.mapTitle !== mapTitle) { mapTitle = s.mapTitle; showTitle(); }
 }
 
@@ -186,7 +219,8 @@ function buildPanes(floors, view) {
     const head = el("div", { class: "pane-head" }, select, up, down);
     const paneEl = el("div", { class: "pane" }, head, mapEl);
     box.append(paneEl);
-    const map = L.map(mapEl, { crs: CRS, minZoom: -2, maxZoom: 5, zoomSnap: 1, attributionControl: false,
+    // (Shift+drag selects a box of markers: Leaflet's box zoom off)
+    const map = L.map(mapEl, { crs: CRS, minZoom: -2, maxZoom: 5, zoomSnap: 1, attributionControl: false, boxZoom: false,
       zoomControl: i === 0, doubleClickZoom: false, maxBounds: L.latLngBounds(tileMeta.bounds).pad(0.3), maxBoundsViscosity: 0.8 });
     const p = { floor, map, el: mapEl, head, select, up, down, base: null, under: null, layer: L.layerGroup().addTo(map), draft: L.layerGroup().addTo(map) };
     panes.push(p);
@@ -206,6 +240,7 @@ function buildPanes(floors, view) {
     map.on("click", (e) => onMapClick(p, e));
     map.on("dblclick", () => { if (tool === "route") finishRoute(); });
     hookPainting(p);
+    hookBox(p);
   });
   // over the panes: the arrows of ropes, holes and portals from one pane's floor to another's
   box.append(document.createElementNS(SVGNS, "svg"));
@@ -264,7 +299,7 @@ let activePane = null;   // the pane the shortcuts move: the last one pointed at
 // the floors that matter on this map
 function floorsThatMatter() {
   const out = new Set(markers.map((m) => m.floor));
-  for (const m of markers) if (m.dest) out.add(m.dest.floor);
+  for (const m of markers) if (destOf(m)) out.add(destOf(m).floor);
   return [...out];
 }
 
@@ -370,13 +405,23 @@ function whoWhen(m) {
   return out;
 }
 
+// a spawn's label: the monster (and ×N), its observation on a line under it
+function spawnLabel(m) {
+  const out = el("span", {}, labelOf(m));
+  if (m.fields?.note) out.append(el("br"), el("small", { class: "sched" }, "✎ " + m.fields.note));
+  return out;
+}
+
 const BIG = { boss: 34 };   // a boss: a bigger disc with a ring
-function icon(m) {
-  const k = ui(m), size = BIG[m.kind] || 26;
-  const cls = "mk" + (BIG[m.kind] ? " " + m.kind : "") + (m.id === selected ? " sel" : "") + (m.locked ? " lock" : "");
+const isSel = (m) => m.id === selected || multi.has(m.id);
+// Revisar: what changed against the link this one was saved from ("new", "edited"; null: the same, or not reviewing)
+const rvStatus = (m) => (mode === "review" ? reviewDiff().status.get(m.id) || null : null);
+function icon(m, extra = "") {
+  const k = ui(m), size = BIG[m.kind] || 26, color = colorOf(m), rv = rvStatus(m);
+  const cls = "mk" + (BIG[m.kind] ? " " + m.kind : "") + (isSel(m) ? " sel" : "") + (m.locked ? " lock" : "") + (rv ? " rv-" + rv : "") + extra;
   // static glyphs only: no text from the link in this HTML
   return L.divIcon({ className: "", iconSize: [size, size], iconAnchor: [size / 2, size / 2],
-    html: `<div class="${cls}" style="background:${k.color};--ring:${k.color}">${m.locked ? "🔒" : k.svg || k.glyph}${m.fields?.combat ? '<span class="badge cb">⚔</span>' : ""}${countBadge(m)}</div>` });
+    html: `<div class="${cls}" style="background:${color};--ring:${color}">${m.locked ? "🔒" : k.svg || k.glyph}${m.fields?.combat ? '<span class="badge cb">⚔</span>' : ""}${countBadge(m)}${m.fields?.note ? '<span class="badge nt">✎</span>' : ""}</div>` });
 }
 // a spawn of more than one monster: ×N on its corner (a number only: nothing typed goes into this HTML)
 function countBadge(m) {
@@ -429,7 +474,7 @@ function startDestPick(id) {
 }
 
 function drawDest(p, m) {
-  const d = m.dest, k = ui(m), sel = m.id === selected;
+  const d = m.dest, k = { ...ui(m), color: colorOf(m) }, sel = m.id === selected;
   if (m.floor === p.floor && d.floor === p.floor) {
     const line = [ll(m.x, m.z), ll(d.x, d.z)];
     L.polyline(line, { color: "#000", weight: sel ? 6 : 5, opacity: 0.35, interactive: false }).addTo(p.layer);
@@ -450,8 +495,8 @@ function drawDest(p, m) {
       html: `<div class="mk end${sel ? " sel" : ""}" style="background:${k.color}">${k.svg || k.glyph}</div>` }) });
   end.on("click", (e) => {
     L.DomEvent.stopPropagation(e);
-    if (tool === "dest") { const [x, z] = cellOf(e.latlng); setDest(destFor, x, z, p.floor); endDestPick(); }
-    else if (tool !== "area" && tool !== "route") select(m.id);
+    if (pickSpot(p, e.latlng, e.originalEvent)) return;
+    if (tool !== "area" && tool !== "route") select(m.id);
   });
   end.on("dragend", () => { const [x, z] = cellOf(end.getLatLng()); selected = m.id; setDest(m.id, x, z, p.floor); });
   // its own floor's label only when the rope is selected or on the other floor (hover elsewhere): nothing cluttered
@@ -462,7 +507,8 @@ function drawDest(p, m) {
 
 function endDestPick() {
   if (tool !== "dest") return;
-  tool = "select";
+  tool = destBack || "select";   // stamp mode: the place tool again
+  destBack = null;
   const id = destFor;
   destFor = null;
   selected = id;
@@ -496,14 +542,14 @@ function drawLinks() {
     for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
     layer.append(e);
   };
-  // the selected one last, on top
-  const list = markers.filter((m) => m.dest && m.dest.floor !== m.floor).sort((a, b) => (a.id === selected) - (b.id === selected));
+  // the selected one last, on top (ropes, holes, portals, and levers that send the player to another floor)
+  const list = markers.filter((m) => destOf(m) && destOf(m).floor !== m.floor && shown(m)).sort((a, b) => (a.id === selected) - (b.id === selected));
   for (const m of list) {
-    const pa = paneOf(m.floor), pb = paneOf(m.dest.floor);
+    const d = destOf(m), pa = paneOf(m.floor), pb = paneOf(d.floor);
     if (!pa || !pb) continue;
-    const a = at(pa, m.x, m.z), b = at(pb, m.dest.x, m.dest.z);
+    const a = at(pa, m.x, m.z), b = at(pb, d.x, d.z);
     if (!a || !b) continue;
-    const sel = m.id === selected, color = sel ? "#ffe066" : ui(m).color;
+    const sel = m.id === selected, color = sel ? "#ffe066" : colorOf(m);
     const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
     if (len < 30) continue;
     // stop short of the end marker; an arrow head there (a two-way rope: at the start too)
@@ -522,55 +568,77 @@ function drawLinks() {
   }
 }
 
+// a tap on a marker while a tool picks a spot: a destination, a lever's wall cell or where it sends, the group's new
+// place; true when the tap was taken
+function pickSpot(p, latlng, ev) {
+  // a tap on a marker gives the marker's own place: a destination snaps onto it; a wall cell, where a lever sends and
+  // where a group goes take the cell under the pointer
+  if (ev && tool !== "dest") latlng = p.map.mouseEventToLatLng(ev);
+  const [x, z] = cellOf(latlng);
+  if (tool === "dest") { setDest(destFor, x, z, p.floor); endDestPick(); return true; }
+  if (tool === "walls") { toggleWall(p, x, z); return true; }
+  if (tool === "pulldest") { setPullDest(x, z, p.floor); return true; }
+  if (tool === "movegroup") { moveGroupTo(x, z, p.floor); return true; }
+  return false;
+}
+
 function drawMarker(p, m) {
-  const k = ui(m), sel = m.id === selected;
+  const k = { ...ui(m), color: colorOf(m) }, sel = isSel(m), rv = rvStatus(m);
   const pick = (e) => {
     L.DomEvent.stopPropagation(e);
-    // picking a destination: a tap on any marker or shape sets it there (a rope may land on a painted area)
-    if (tool === "dest") { const [x, z] = cellOf(e.latlng); setDest(destFor, x, z, p.floor); endDestPick(); return; }
+    // picking a spot: a tap on any marker or shape sets it there (a rope may land on a painted area)
+    if (pickSpot(p, e.latlng, e.originalEvent)) return;
     if (tool === "area" || tool === "route") return;
+    // Shift+click: add it to the selection, or take it off
+    if (e.originalEvent?.shiftKey && mode === "edit") { toggleMulti(m.id); return; }
+    // a place tool picks up a spawn's settings when one is tapped (the stamp: its monster, count and radius)
+    if (tool === "spawn" && m.kind === "spawn") takeStamp(m);
     select(m.id);
   };
   if ("x" in m) {
     if (m.dest) drawDest(p, m);
+    if (m.kind === "lever") drawPull(p, m);
     if (m.kind === "spawn" && m.fields?.radius) {
       L.circle(ll(m.x, m.z), { radius: m.fields.radius, color: k.color, weight: 1, fillOpacity: 0.12, interactive: false }).addTo(p.layer);
     }
     const mk = L.marker(ll(m.x, m.z), { icon: icon(m), draggable: canEdit(m), autoPan: true, zIndexOffset: sel ? 1000 : 0 });
     mk.on("click", pick);
-    mk.on("dragstart", () => { selected = m.id; });
+    mk.on("dragstart", () => { if (!multi.has(m.id)) { selected = m.id; multi.clear(); } });
     mk.on("dragend", () => {
       const [x, z] = cellOf(mk.getLatLng());
+      if (multi.has(m.id)) { moveGroupBy(x - m.x, z - m.z); return; }   // one of a group: the group moves
       commit(() => { const n = byId(m.id); if (!n || (n.x === x && n.z === z)) return false; n.x = x; n.z = z; });
     });
-    const label = labelOf(m), away = m.dest && m.dest.floor !== m.floor ? leadsText(m.dest.floor) : "";
+    const label = labelOf(m), d = destOf(m), away = d && d.floor !== m.floor ? leadsText(d.floor) : "";
     const text = [label, away, m.fields?.combat ? "⚔ " + t("combatOn") : ""].filter(Boolean).join(" · ");
     const permanent = labelShown(p, m);
     if (m.kind === "boss" || m.kind === "npc") tip(mk, whoWhen(m), { permanent, ...(BIG[m.kind] ? { offset: [0, -18] } : {}) });
+    else if (m.kind === "spawn" && m.fields?.note) tip(mk, spawnLabel(m), { permanent });
     else tip(mk, m.kind === "rope2" ? ("↔ " + text).trim() : text, { permanent });   // a two-way rope: ↔ always
     mk.addTo(p.layer);
     return;
   }
   if (m.cells) {
-    const style = { color: k.color, weight: 0, fillOpacity: sel ? 0.45 : 0.3, interactive: tool === "select" };
+    const style = { color: k.color, weight: 0, fillOpacity: sel ? 0.45 : 0.3, interactive: tool === "select" || tool === "walls" || tool === "movegroup" };
     const poly = L.polygon(rings(m.cells), style).on("click", pick).addTo(p.layer);
-    L.polyline(outline(m.cells), { color: sel ? "#ffe066" : k.color, weight: sel ? 3 : 2, dashArray: m.locked ? "4 4" : null, interactive: false }).addTo(p.layer);
+    const edge = sel ? "#ffe066" : rv ? RV_COLOR[rv] : k.color;
+    L.polyline(outline(m.cells), { color: edge, weight: sel || rv ? 3 : 2, dashArray: m.locked ? "4 4" : null, interactive: false }).addTo(p.layer);
     const c = ML.where(m);
     if (c && labelOf(m) && labelShown(p, m)) {
       const anchor = L.marker(ll(c[0], c[1]), { icon: L.divIcon({ className: "", iconSize: [0, 0] }), interactive: false }).addTo(p.layer);
       tip(anchor, (m.locked ? "🔒 " : "") + labelOf(m), { offset: [0, 0], direction: "center" });
     } else if (labelOf(m)) tip(poly, (m.locked ? "🔒 " : "") + labelOf(m), { permanent: false, sticky: true, offset: [0, -10] });
-    if (sel && canEdit(m)) moveHandle(p, m);
+    if (m.id === selected && !multi.size && canEdit(m)) moveHandle(p, m);
     return poly;
   }
   if (m.points) {
-    const line = L.polyline(m.points.map(([x, z]) => ll(x, z)), { color: sel ? "#ffe066" : k.color, weight: sel ? 5 : 4,
-      dashArray: m.locked ? "6 6" : null, interactive: tool === "select" }).on("click", pick).addTo(p.layer);
+    const line = L.polyline(m.points.map(([x, z]) => ll(x, z)), { color: sel ? "#ffe066" : rv ? RV_COLOR[rv] : k.color, weight: sel || rv ? 5 : 4,
+      dashArray: m.locked ? "6 6" : null, interactive: tool === "select" || tool === "movegroup" }).on("click", pick).addTo(p.layer);
     const [x1, z1] = m.points[m.points.length - 1];
     L.circleMarker(ll(m.points[0][0], m.points[0][1]), { radius: 5, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
     L.circleMarker(ll(x1, z1), { radius: 7, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
     if (labelOf(m)) tip(line, (m.locked ? "🔒 " : "") + labelOf(m), { direction: "center", offset: [0, 0], permanent: labelShown(p, m), sticky: !labelShown(p, m) });
-    if (sel && canEdit(m)) {
+    if (m.id === selected && !multi.size && canEdit(m)) {
       m.points.forEach(([x, z], i) => {
         const h = L.marker(ll(x, z), { draggable: true, icon: L.divIcon({ className: "", html: '<div class="handle"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }) });
         h.on("dragend", () => {
@@ -605,16 +673,72 @@ function moveHandle(p, m) {
   h.addTo(p.layer);
 }
 
+// ---- a lever's action on the map: the wall cells it opens (hatched in its colour, a dashed line to them) or where it
+// sends the player (a dashed arrow on the same floor; on another floor a small end marker there, and an arrow across
+// the panes when both are shown)
+function drawPull(p, m) {
+  const sel = m.id === selected, color = sel ? "#ffe066" : colorOf(m);
+  const cells = m.floor === p.floor ? wallCells(m, markers) : [];
+  if (cells.length) {
+    L.polygon(rings(cells), { color, weight: 0, fillOpacity: sel ? 0.5 : 0.32, interactive: false, className: "walls" }).addTo(p.layer);
+    L.polyline(outline(cells), { color, weight: 2, dashArray: "3 3", interactive: false }).addTo(p.layer);
+    const c = ML.where({ cells });
+    L.polyline([ll(m.x, m.z), ll(c[0], c[1])], { color, weight: sel ? 2.5 : 1.5, dashArray: "2 5", opacity: 0.9, interactive: false }).addTo(p.layer);
+  }
+  const d = leverTo(m);
+  if (!d) return;
+  if (m.floor === p.floor && d.floor === p.floor) {
+    L.polyline([ll(m.x, m.z), ll(d.x, d.z)], { color: "#000", weight: 5, opacity: 0.35, interactive: false }).addTo(p.layer);
+    L.polyline([ll(m.x, m.z), ll(d.x, d.z)], { color, weight: sel ? 3.5 : 2.5, dashArray: "7 5", interactive: false }).addTo(p.layer);
+  }
+  if (d.floor === p.floor) pullEnd(p, m, d);
+}
+function pullEnd(p, m, d) {
+  const sel = m.id === selected;
+  const end = L.marker(ll(d.x, d.z), { keyboard: false, zIndexOffset: sel ? 900 : -100,
+    icon: L.divIcon({ className: "", iconSize: [20, 20], iconAnchor: [10, 10],
+      html: `<div class="mk end${sel ? " sel" : ""}" style="background:${colorOf(m)}">${KIND_UI.lever.svg}</div>` }) });
+  end.on("click", (e) => { L.DomEvent.stopPropagation(e); if (!pickSpot(p, e.latlng, e.originalEvent)) select(m.id); });
+  const text = t("kind.lever") + (labelOf(m) ? ` "${labelOf(m)}"` : ` #${m.id}`) + " → " + t("pull.send");
+  end.bindTooltip(el("span", {}, text), { direction: "bottom", className: "lbl end", offset: [0, 8], permanent: sel });
+  end.addTo(p.layer);
+}
+
+// Revisar: the halo colours (new, moved or edited) and whether a marker is drawn ("only changes": the changed ones)
+const RV_COLOR = { new: "#3ddc84", edited: "#f5a524", removed: "#ff6b6e" };
+const shown = (m) => mode !== "review" || !reviewOnly || !!rvStatus(m);
+
 function drawPane(p) {
   p.layer.clearLayers();
-  const mine = markers.filter((m) => m.floor === p.floor);
+  const mine = markers.filter((m) => m.floor === p.floor && shown(m));
   // areas under routes under points; the selected one last
-  const order = (m) => (m.cells ? 0 : m.points ? 1 : 2) + (m.id === selected ? 3 : 0);
+  const order = (m) => (m.cells ? 0 : m.points ? 1 : 2) + (isSel(m) ? 3 : 0);
   for (const m of mine.sort((a, b) => order(a) - order(b))) drawMarker(p, m);
-  // the end markers of ropes, holes and portals from other floors that land on this one
-  for (const m of markers) if (m.dest && m.dest.floor === p.floor && m.floor !== p.floor) drawDest(p, m);
+  // the end markers of ropes, holes and portals from other floors that land on this one (and levers that send here)
+  for (const m of markers) {
+    if (m.floor === p.floor || !shown(m)) continue;
+    if (m.dest && m.dest.floor === p.floor) drawDest(p, m);
+    const d = leverTo(m);
+    if (d && d.floor === p.floor) pullEnd(p, m, d);
+  }
+  if (mode === "review") for (const m of reviewDiff().removed) if (m.floor === p.floor) drawGhost(p, m);
   drawDraft(p);
 }
+
+// Revisar: a marker of the earlier link that this one removed, where it was, faded (never in the markers: look only)
+function drawGhost(p, m) {
+  const info = () => { selected = null; multi.clear(); ghostShown = m; refresh(); };
+  if ("x" in m) {
+    const mk = L.marker(ll(m.x, m.z), { icon: icon(m, " rv-removed"), keyboard: false, zIndexOffset: -200 });
+    mk.on("click", (e) => { L.DomEvent.stopPropagation(e); info(); });
+    tip(mk, "✕ " + (labelOf(m) || t("kind." + m.kind)), { permanent: false });
+    mk.addTo(p.layer);
+  } else {
+    const pts = m.cells ? outline(m.cells) : [m.points.map(([x, z]) => ll(x, z))];
+    L.polyline(pts, { color: RV_COLOR.removed, weight: 2, dashArray: "4 4", opacity: 0.8 }).on("click", (e) => { L.DomEvent.stopPropagation(e); info(); }).addTo(p.layer);
+  }
+}
+let ghostShown = null;   // Revisar: the removed marker whose panel is open
 
 function drawDraft(p, preview) {
   p.draft.clearLayers();
@@ -627,10 +751,17 @@ function drawDraft(p, preview) {
   }
 }
 
+let rvCache = null;
+function reviewDiff() { return (rvCache ||= RV.diffOf(baseMarkers, markers)); }
+
 function refresh() {
-  // picking a destination for a marker that is gone or locked now (undo, delete): stop picking
-  if (tool === "dest" && !canEdit(byId(destFor))) { tool = "select"; destFor = null; paintTools(); }
+  rvCache = null;
+  // picking a spot for a marker that is gone or locked now (undo, delete): stop picking
+  if (["dest", "walls", "pulldest"].includes(tool) && !canEdit(byId(destFor))) { tool = "select"; destFor = null; paintTools(); }
+  if (tool === "movegroup" && multi.size < 2) { tool = "select"; paintTools(); }
+  if (ghostShown && (mode !== "review" || selected != null)) ghostShown = null;
   for (const p of panes) drawPane(p);
+  paintDiffBar();
   drawLinksSoon();
   paintFloorSelects();
   paintFloorCard();
@@ -665,11 +796,25 @@ function paintTools() {
   for (const p of panes) {
     const paint = tool === "area";
     p.el.classList.toggle("painting", paint);
-    p.el.classList.toggle("picking", tool === "dest");
+    p.el.classList.toggle("picking", ["dest", "walls", "pulldest", "movegroup"].includes(tool));
     if (paint) p.map.dragging.disable(); else p.map.dragging.enable();
   }
   const sub = $("subtools");
   sub.textContent = "";
+  sub.classList.toggle("stamp", tool === "spawn");
+  // stamp mode: what the next click places, how many so far, Done
+  if (KIND_UI[tool] && tool !== "area" && tool !== "route" && mode === "edit") stampBar(sub);
+  if (tool === "walls") {
+    const m = byId(destFor);
+    sub.append(el("span", { class: "pick" }, dotNode("lever"), " " + t("pull.marking", m ? wallCells(m, markers).length + " / " + MAX_WALLS : "")),
+      el("button", { type: "button", class: "primary", onclick: endPick }, t("stampDone")));
+  }
+  if (tool === "pulldest") {
+    sub.append(el("span", { class: "pick" }, dotNode("lever"), " " + t("pull.destHint")), el("button", { type: "button", onclick: endPick }, t("cancel")));
+  }
+  if (tool === "movegroup") {
+    sub.append(el("span", { class: "pick" }, "✥ " + t("moveHint")), el("button", { type: "button", onclick: endPick }, t("cancel")));
+  }
   if (tool === "area") {
     for (const mode of ["brush", "rect", "erase"]) {
       sub.append(el("button", { type: "button", class: areaMode === mode ? "on" : "", onclick: () => { areaMode = mode; applyTool(); } }, t(mode)));
@@ -688,6 +833,67 @@ function paintTools() {
   sub.hidden = !sub.childNodes.length;
 }
 
+// ---- stamp mode: the place tool stays armed. For a spawn the sub-bar holds what the next one gets (monster, how
+// many, how far: the last spawn placed, edited or tapped), the species of this map as chips, how many were placed, and
+// Done; for the other kinds its icon, the count and Done.
+function stampBar(sub) {
+  const head = el("span", { class: "pick", title: t("stampHelp") }, dotNode(tool), " " + (tool === "spawn" ? t("stampWord") : t("kind." + tool)));
+  sub.append(head);
+  if (tool === "spawn") {
+    const F = KIND_UI.spawn.fields;
+    const input = el("input", { type: "text", maxlength: 60, list: "monsterList", autocomplete: "off", class: "st-mon",
+      placeholder: t("monsterPlaceholder"), "aria-label": t("field.monster") });
+    input.value = stamp.monster;
+    input.addEventListener("change", () => {
+      const typed = input.value.trim();
+      stamp.monster = MONSTERS.find((x) => x.toLowerCase() === typed.toLowerCase()) || typed;
+      input.value = stamp.monster;
+      paintTools();
+    });
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); });
+    const n = el("input", { type: "number", min: F.count.min, max: F.count.max, inputmode: "numeric", "aria-label": t("field.count") });
+    n.value = stamp.count;
+    n.addEventListener("change", () => { stamp.count = clampInt(n.value, F.count); paintTools(); });
+    const step = (d) => { stamp.count = clampInt(stamp.count + d, F.count); paintTools(); };
+    sub.append(input, el("div", { class: "stepper" },
+      el("button", { type: "button", "aria-label": "−1", onclick: () => step(-1) }, "−"), n,
+      el("button", { type: "button", "aria-label": "+1", onclick: () => step(1) }, "+")));
+    sub.append(el("span", { class: "st-r" }, el("span", { class: "lbl-s" }, t("radiusWord")), el("div", { class: "seg", role: "group", "aria-label": t("field.radius") },
+      [0, 1, 2, 3, 5, 8].map((r) => el("button", { type: "button", class: stamp.radius === r ? "on" : "", "aria-pressed": String(stamp.radius === r),
+        onclick: () => { stamp.radius = r; paintTools(); } }, String(r))))));
+  }
+  if (stampPlaced) sub.append(el("span", { class: "chip on placed" }, t("stampPlaced", stampPlaced)));
+  sub.append(el("button", { type: "button", class: "primary", title: "Esc", onclick: () => setTool("select") }, t("stampDone")));
+  if (tool === "spawn") {
+    const species = speciesOnMap().slice(0, 8);
+    if (species.length) {
+      sub.append(el("div", { class: "chips st-chips" }, species.map(([name, s]) =>
+        el("button", { type: "button", class: "chip" + (name === stamp.monster ? " on" : ""), "aria-pressed": String(name === stamp.monster),
+          onclick: () => { stamp.monster = name; paintTools(); } }, name, el("i", {}, String(s.n))))));
+    }
+  }
+}
+
+// the stamp takes a spawn's settings (one placed, edited or tapped while the spawn tool is armed)
+function takeStamp(m) {
+  const f = m.fields || {};
+  if (f.monster) stamp.monster = f.monster;
+  if (f.count != null) stamp.count = Math.max(1, Math.round(+f.count) || 1);
+  if (f.radius != null) stamp.radius = Math.round(+f.radius) || 0;
+  if (tool === "spawn") paintTools();
+}
+
+// the end of a lever's or a group's pick: back to Select with the lever (or the group) still selected
+function endPick() {
+  if (!["walls", "pulldest", "movegroup"].includes(tool)) return;
+  const id = destFor;
+  tool = "select";
+  destFor = null;
+  if (id != null) pullPending.delete(id);
+  $("toast").hidden = true;
+  applyTool();
+}
+
 function setTool(name) {
   closeMenus();
   if (name === "legend") { showLegend(); return; }
@@ -695,16 +901,22 @@ function setTool(name) {
   if (name === "more") { toggleMenu("moreMenu"); return; }
   if (mode !== "edit" && name !== "select") { toast(t("reviewNoEdit")); return; }
   if (tool === "route" && name !== "route") finishRoute();
+  if (["walls", "pulldest"].includes(tool) && destFor != null) pullPending.delete(destFor);
   destFor = null;
+  destBack = null;
+  if (name !== tool) stampPlaced = 0;
   tool = name;
+  if (name !== "select") multi.clear();
   // on a phone a drawing tool closes the panel of anything it doesn't work on (the drawer covers half the map); on a
   // computer the docked panel stays (closing and reopening it on every placement would shift the map each time)
   const sel = byId(selected);
   if (name !== "select" && PHONE.matches && !(sel && sel.kind === name && (name === "area" || name === "route"))) selected = null;
+  // the spawn stamp starts from the selected spawn (or the last one placed)
+  if (name === "spawn" && sel?.kind === "spawn") takeStamp(sel);
   applyTool();
   if (name === "area") toast(t("hintArea"));
   else if (name === "route") toast(t("hintRoute"));
-  else if (name !== "select") toast(`${t("kind." + name)}: ${t("hintPlace")}`);
+  else if (name !== "select" && !PHONE.matches) toast(t("hintStamp", t("kind." + name)));   // (a phone: the bar says it)
 }
 
 // ---- the phone's menus: the map things (rope .. NPC: icon, name, one line each) and "More" (the other tools, labels,
@@ -795,15 +1007,18 @@ function newMarker(kind, floor, geo) {
 
 function onMapClick(p, e) {
   const [x, z] = cellOf(e.latlng);
+  if (boxJustEnded) { boxJustEnded = false; return; }   // the release of a Shift+drag box, not a tap
   if (tool === "select") {
+    if (e.originalEvent?.shiftKey) return;   // Shift+click on the map: nothing (a box starts from a drag)
     selected = null;
+    multi.clear();
     refresh();
     showCell(x, z, p.floor);
     copy(posLine(x, z, p.floor));
     return;
   }
   if (tool === "area") return;
-  if (tool === "dest") { setDest(destFor, x, z, p.floor); endDestPick(); return; }
+  if (pickSpot(p, e.latlng, e.originalEvent)) return;
   if (tool === "route") {
     const sel = byId(selected);
     if (!draftRoute && canEdit(sel) && sel.kind === "route" && sel.floor === p.floor) {
@@ -818,10 +1033,24 @@ function onMapClick(p, e) {
   }
   const kind = tool;
   let id;
-  commit(() => { const m = newMarker(kind, p.floor, { x, z }); markers.push(m); selected = id = m.id; });
-  // a rope, hole or portal asks at once where it leads (Skip leaves it unset)
-  if (leads(kind)) startDestPick(id);
-  else setTool("select");
+  commit(() => {
+    const m = newMarker(kind, p.floor, { x, z });
+    if (kind === "spawn") {   // the stamp: the monster, how many and how far of the last one
+      if (stamp.monster) m.fields.monster = stamp.monster;
+      m.fields.count = stamp.count;
+      m.fields.radius = stamp.radius;
+    }
+    markers.push(m);
+    selected = id = m.id;
+  });
+  stampPlaced++;
+  // on a phone the drawer would cover the map: a spawn stays unselected (the sub-bar holds its settings), any other
+  // kind opens its panel (its name to type) and the tool goes back to Select
+  if (PHONE.matches && kind === "spawn") { selected = null; refresh(); }
+  // a rope, hole or portal asks at once where it leads (Skip leaves it unset); then back to the same tool
+  if (leads(kind)) { startDestPick(id); if (!PHONE.matches) destBack = kind; }
+  else if (PHONE.matches && kind !== "spawn") setTool("select");
+  else paintTools();
 }
 
 function finishRoute() {
@@ -934,8 +1163,12 @@ function renderPanel() {
   const m = byId(selected);
   if (panelHeld && m && m.id === panelShows && tool !== "dest" && !panel.hidden) { panelStale = true; return; }
   panelShows = m && tool !== "dest" ? m.id : null;
-  // while a destination is picked the panel steps aside (on a phone it would cover half the map)
-  if (!m || tool === "dest") { panel.hidden = true; panel.textContent = ""; return; }
+  // several selected: the group's panel; Revisar with nothing selected: the summary (a removed marker: its panel)
+  if (multi.size > 1 && tool !== "dest") { groupPanel(panel); return; }
+  if (!m && mode === "review" && !summaryClosed) { ghostShown ? ghostPanel(panel, ghostShown) : summaryPanel(panel); return; }
+  // while a destination is picked the panel steps aside (on a phone it would cover half the map; a lever's walls and
+  // where it sends: the panel stays on a computer, it shows the count)
+  if (!m || tool === "dest" || (PHONE.matches && (tool === "walls" || tool === "pulldest"))) { panel.hidden = true; panel.textContent = ""; return; }
   panel.hidden = false;
   panel.textContent = "";
   const k = ui(m), editable = canEdit(m);
@@ -951,6 +1184,7 @@ function renderPanel() {
   }
   const body = el("div", { class: "body" });
   panel.append(body);
+  if (mode === "review") reviewNote(body, m);
   if (!(m.kind in KIND_UI)) body.append(el("div", { class: "note" }, t("unknownKind")));
   else if (m.locked) body.append(el("div", { class: "note" }, "🔒 " + t("locked")));
   else if (mode !== "edit") body.append(el("div", { class: "note" }, t("reviewNoEdit")));
@@ -966,6 +1200,8 @@ function renderPanel() {
   else for (const [name, f] of Object.entries(k.fields)) {
     body.append(el("label", {}, fieldWord(m.kind, name)));
     if (f.input === "schedule") { schedulePicker(body, m, editable); continue; }
+    if (f.input === "color") { body.lastChild.remove(); colorPicker(body, m, editable); continue; }
+    if (f.input === "pull") { body.lastChild.remove(); leverFields(body, m, editable); continue; }
     if (f.input === "check") { body.lastChild.remove(); checkField(body, m, name, editable); continue; }
     if (f.input === "boss") { bossInput(body, m, editable); continue; }
     const v = m.fields?.[name] ?? "";
@@ -991,7 +1227,121 @@ function renderPanel() {
     body.append(el("label", { class: "check" }, box, t("lock")));
   }
   panel.append(el("div", { class: "ft" },
+    mode === "edit" && m.kind in KIND_UI ? el("button", { type: "button", "data-act": "duplicate", title: t("dupHelp"), onclick: duplicateSel }, "⧉ " + t("dup")) : null,
     el("button", { type: "button", class: "danger", "data-act": "delete", disabled: mode !== "edit" || (!editable && !(STAFF && m.kind in KIND_UI)), onclick: deleteSelected }, t("del"))));
+}
+
+// ---- several selected: what they are, then Move, Duplicate, To floor, Delete (each one undo step)
+function groupPanel(panel) {
+  panel.hidden = false;
+  panel.textContent = "";
+  const list = [...multi].map(byId).filter(Boolean), ids = groupIds(), locked = list.length - ids.length;
+  const editable = mode === "edit" && ids.length > 0;
+  panel.append(el("div", { class: "hd" }, el("span", { class: "mk head plain" }, "▣"), el("h3", {}, t("selN", list.length)),
+    el("button", { type: "button", class: "x", "data-act": "close", title: t("close") + " (Esc)", "aria-label": t("close"), onclick: () => { multi.clear(); refresh(); } }, "✕")));
+  const by = {};
+  for (const m of list) by[m.kind] = (by[m.kind] || 0) + 1;
+  const body = el("div", { class: "body" });
+  panel.append(body);
+  body.append(el("div", { class: "chips" }, Object.entries(by).map(([k, n]) => el("span", { class: "chip" }, dotNode(k, "mk mini"), (KIND_UI[k] ? t("kind." + k) : k), el("i", {}, String(n))))));
+  const floors = [...new Set(list.map((m) => m.floor))];
+  body.append(el("div", { class: "id" }, floors.map(floorShort).join(" · ")));
+  if (locked) body.append(el("div", { class: "note" }, t("selLockedOut", locked)));
+  body.append(el("div", { class: "grid2" },
+    el("button", { type: "button", "data-act": "move", disabled: !editable, title: t("moveSelHelp"), onclick: () => { tool = "movegroup"; applyTool(); toast(t("moveHint")); } }, "✥ " + t("moveSel")),
+    el("button", { type: "button", "data-act": "duplicate", disabled: !editable, title: t("dupHelp"), onclick: duplicateSel }, "⧉ " + t("dup"))));
+  // to another floor: the floors with their counts; the view follows
+  const fs = el("select", { disabled: !editable, "aria-label": t("toFloor"), "data-act": "tofloor" });
+  const counts = FL.floorCounts(markers);
+  fs.append(el("option", { value: "" }, t("toFloor")));
+  for (const f of tileMeta.floors) fs.append(el("option", { value: f }, floorOptionText(f, counts)));
+  fs.addEventListener("change", () => { if (fs.value) groupToFloor(fs.value); });
+  body.append(el("div", { class: "row tight" }, fs));
+  body.append(el("div", { class: "id hintline" }, t("selHelp")));
+  panel.append(el("div", { class: "ft" },
+    el("button", { type: "button", class: "danger", "data-act": "delete", disabled: !editable, onclick: deleteSelected }, t("del") + " (" + ids.length + ")")));
+}
+
+// ---- an area's or a portal's colour: swatches (the kind's own first), the map redraws at once
+function colorPicker(body, m, editable) {
+  const now = +m.fields?.color || 0;
+  body.append(el("div", { class: "fl" }, el("span", {}, t("field.color"))));
+  body.append(el("div", { class: "swatches", role: "radiogroup", "aria-label": t("field.color") }, (COLOR_CHOICES[m.kind] || [0]).map((c) =>
+    el("button", { type: "button", role: "radio", class: "sw" + (now === c ? " on" : ""), "aria-checked": String(now === c), disabled: !editable,
+      title: t("color." + c), "aria-label": t("color." + c), "data-color": c, style: `--c:${COLOR_HEX[c] || ui(m).color}`,
+      onclick: () => setField(m.id, "color", c || null) }, el("i", {})))));
+  body.append(el("div", { class: "preview" }, t("colorSay", t("color." + now))));
+}
+
+// ---- a lever's action: what pulling it does (nothing said / opens walls / takes the player), and for walls which
+// cells (marked on the map) or which area, toggle or timed (seconds); a sentence of what it means; drawn on the map
+const SECS = [10, 30, 60, 120];
+function leverFields(body, m, editable) {
+  const p = parseLever(m.fields?.pull), pend = pullPending.get(m.id);
+  const act = p.act === "none" && pend ? pend.act : p.act;
+  body.append(el("div", { class: "fl" }, el("span", {}, t("field.pull"))));
+  const choose = (a) => {
+    if (a === act) return;
+    if (a === "none") { pullPending.delete(m.id); setPull(m.id, ""); return; }
+    if (a === "send") { pullPending.delete(m.id); if (p.act !== "none") setPull(m.id, ""); startLeverPick(m.id, "pulldest"); return; }
+    pullPending.set(m.id, { act: "walls", how: "cells" });
+    if (p.act !== "none") setPull(m.id, ""); else renderPanel();
+    startLeverPick(m.id, "walls");
+  };
+  body.append(el("div", { class: "seg", role: "group", "aria-label": t("field.pull") }, [["none", "pull.none"], ["walls", "pull.walls"], ["send", "pull.send"]].map(([a, w]) =>
+    el("button", { type: "button", class: act === a ? "on" : "", "aria-pressed": String(act === a), disabled: !editable, "data-pull": a, onclick: () => choose(a) }, t(w)))));
+  if (act === "walls") {
+    const how = p.area != null ? "area" : pend?.how || "cells";
+    const secs = p.act === "walls" ? p.secs : pend?.secs || 0;   // (switching cells / area keeps the timer)
+    const write = (q) => setPull(m.id, leverCode({ act: "walls", secs, ...(p.act === "walls" ? { cells: p.cells, area: p.area } : {}), ...q }));
+    body.append(el("div", { class: "seg sub", role: "group" }, [["cells", "pull.cellsMode"], ["area", "pull.areaMode"]].map(([h, w]) =>
+      el("button", { type: "button", class: how === h ? "on" : "", "aria-pressed": String(how === h), disabled: !editable, "data-how": h,
+        onclick: () => {
+          if (h === how) return;
+          pullPending.set(m.id, { act: "walls", how: h, secs });
+          if (p.act !== "none") setPull(m.id, ""); else renderPanel();
+          if (h === "cells") startLeverPick(m.id, "walls");
+        } }, t(w)))));
+    if (how === "cells") {
+      const n = p.cells ? p.cells.length : 0;
+      body.append(el("div", { class: "row tight" },
+        el("button", { type: "button", class: tool === "walls" ? "on" : "primary", disabled: !editable, "data-act": "mark", onclick: () => (tool === "walls" ? endPick() : startLeverPick(m.id, "walls")) },
+          tool === "walls" ? "✓ " + t("stampDone") : "▦ " + t("pull.mark")),
+        el("span", { class: "id" }, n ? t(n === 1 ? "pull.walls1" : "pull.wallsN", n) : "")));
+    } else {
+      const areas = markers.filter((a) => a.kind === "area" && a.floor === m.floor);
+      if (!areas.length) body.append(el("div", { class: "note" }, t("pull.noArea")));
+      else {
+        const s = el("select", { disabled: !editable, "aria-label": t("pull.pickArea"), "data-act": "area" });
+        s.append(el("option", { value: "" }, t("pull.pickArea")));
+        for (const a of areas) s.append(el("option", { value: a.id }, `#${a.id}` + (a.fields?.label ? ` "${a.fields.label}"` : "") + ` · ${t("cells", a.cells.length)}`));
+        s.value = p.area != null ? String(p.area) : "";
+        s.addEventListener("change", () => { if (s.value !== "") { pullPending.delete(m.id); setPull(m.id, leverCode({ act: "walls", secs, area: +s.value })); } });
+        body.append(s);
+      }
+    }
+    // toggle (the game's default) or timed, and how many seconds
+    const timed = secs > 0;
+    body.append(el("div", { class: "seg sub", role: "group" },
+      el("button", { type: "button", class: timed ? "" : "on", "aria-pressed": String(!timed), disabled: !editable || p.act !== "walls", "data-mode": "toggle", onclick: () => write({ secs: 0 }) }, t("pull.toggle")),
+      el("button", { type: "button", class: timed ? "on" : "", "aria-pressed": String(timed), disabled: !editable || p.act !== "walls", "data-mode": "timed", onclick: () => { if (!timed) write({ secs: 30 }); } }, t("pull.timed"))));
+    if (timed) {
+      const other = el("input", { type: "number", min: 1, max: 3600, inputmode: "numeric", disabled: !editable, class: "other", "aria-label": t("pull.secs") });
+      other.value = SECS.includes(secs) ? "" : secs;
+      other.placeholder = t("radiusOtherShort");
+      other.addEventListener("change", () => { const v = Math.round(+other.value); if (v >= 1 && v <= 3600) write({ secs: v }); });
+      body.append(el("div", { class: "radius-row" }, el("div", { class: "seg radius" }, SECS.map((s) =>
+        el("button", { type: "button", class: secs === s ? "on" : "", "aria-pressed": String(secs === s), disabled: !editable, onclick: () => write({ secs: s }) }, s + " s"))), other));
+    }
+  }
+  if (act === "send") {
+    const d = leverTo(m);
+    body.append(el("div", { class: "row tight" },
+      d ? el("div", { class: "dest" }, dotNode("lever"), spotText(d)) : null,
+      el("button", { type: "button", class: d ? "" : "primary", disabled: !editable, "data-act": "pulldest", onclick: () => startLeverPick(m.id, "pulldest") }, d ? t("changeDest") : t("pull.setDest")),
+      d ? el("button", { type: "button", onclick: () => showDest(d) }, t("view")) : null));
+  }
+  body.append(el("div", { class: "preview", "data-pull-say": "" }, "🕹 " + leverText(m.fields?.pull, t, m, floorShort)));
 }
 
 // one field of a marker: a value, or none ("" / null: the field goes); a changed value is one undo step
@@ -1001,6 +1351,9 @@ function setField(id, name, val) {
     if (!canEdit(n) || (n.fields[name] ?? null) === (val === "" ? null : val)) return false;
     if (val === "" || val == null) delete n.fields[name]; else n.fields[name] = val;
   });
+  // a spawn edited: the stamp follows it (the next one placed gets the same monster, count and radius)
+  const n = byId(id);
+  if (n?.kind === "spawn" && ["monster", "count", "radius"].includes(name)) takeStamp(n);
 }
 
 // ---- a spawn: which monster (typed, or one already on this map as a chip), how many (− / +), how far they roam
@@ -1071,6 +1424,13 @@ function spawnFields(body, m, editable) {
     const per = floors.length > 1 ? " · " + floors.map(([fl2, c]) => `${floorShort(fl2)}: ${c}`).join(" · ") : "";
     body.append(el("div", { class: "preview total" }, t(floors.length > 1 ? "onMapN" : "onMap1", mine[1].n, monster, floors.length) + per));
   }
+  // an observation, shown under the monster's name on the map (one line)
+  body.append(fl(t("field.note")));
+  const note = el("input", { type: "text", maxlength: 120, disabled: !editable, autocomplete: "off", placeholder: t("notePlaceholder"), "data-field": "note" });
+  note.value = f.note ?? "";
+  note.addEventListener("change", () => setField(m.id, "note", note.value.trim()));
+  note.addEventListener("keydown", (e) => { if (e.key === "Enter") note.blur(); });
+  body.append(note);
 }
 
 function spawnSentence(monster, count, radius) {
@@ -1203,13 +1563,157 @@ function showDest(d) {
 }
 
 function deleteSelected() {
+  if (mode !== "edit") return;
+  if (multi.size) {   // a group: its markers that can be changed, in one undo step
+    const ids = new Set(groupIds());
+    if (!ids.size) return;
+    commit(() => { markers = markers.filter((x) => !ids.has(x.id)); multi.clear(); selected = null; });
+    return;
+  }
   const m = byId(selected);
-  if (!m || mode !== "edit" || (m.locked && !STAFF)) return;
+  if (!m || (m.locked && !STAFF)) return;
   commit(() => { markers = markers.filter((x) => x.id !== m.id); selected = null; });
 }
 
+// ---- several at once: Shift+click adds or takes off one, Shift+drag a box; the group moves (drag one of them, or Move
+// then a tap), duplicates, goes to another floor or is deleted, each one undo step. Locked context markers stay out.
+// the group's markers that can be changed (the selection's ids, locked ones left out)
+const groupIds = () => [...multi].filter((id) => canEdit(byId(id)));
+
+function toggleMulti(id) {
+  if (!multi.size && selected != null && selected !== id) multi.add(selected);
+  if (multi.has(id)) multi.delete(id); else multi.add(id);
+  if (!multi.size && selected === id) selected = null;
+  else if (multi.size === 1) { selected = [...multi][0]; multi.clear(); }
+  else if (multi.size === 0) selected = null;
+  else selected = null;
+  refresh();
+}
+
+function moveGroupBy(dx, dz, floor = null) {
+  const ids = new Set(groupIds());
+  if (!ids.size || (!dx && !dz && floor == null)) { refresh(); return; }
+  commit(() => {
+    markers = markers.map((m) => {
+      if (!ids.has(m.id)) return m;
+      const n = ED.moved(m, dx, dz);
+      return floor != null && floor !== m.floor ? ED.onFloor(n, floor) : n;
+    });
+  });
+}
+
+// Move, then a tap: the group's middle goes there (on the tapped pane's floor)
+function moveGroupTo(x, z, floor) {
+  const c = ED.middle(groupIds().map((id) => ML.where(byId(id))).filter(Boolean));
+  tool = "select";
+  paintTools();
+  if (c) moveGroupBy(x - c[0], z - c[1], floor);
+}
+
+// Duplicate (Ctrl+D): the selection's copies, a little apart, become the selection
+function duplicateSel() {
+  if (mode !== "edit") return;
+  const list = (multi.size ? [...multi] : selected != null ? [selected] : []).map(byId).filter((m) => m && m.kind in KIND_UI);
+  if (!list.length) return;
+  let copies;
+  commit(() => {
+    [copies, nextId] = ED.duplicated(list, nextId);
+    markers.push(...copies);
+    multi.clear();
+    if (copies.length > 1) { for (const c of copies) multi.add(c.id); selected = null; } else selected = copies[0].id;
+  });
+  toast(t("dupDone", copies.length));
+}
+
+// To floor: the group goes there; the view follows unless a pane shows that floor already
+function groupToFloor(floor) {
+  moveGroupBy(0, 0, floor);
+  if (!panes.some((p) => p.floor === floor)) showFloor(floor);
+}
+
+// Shift+drag on a map (Select): a box; the markers of that floor inside it join the selection
+let boxJustEnded = false;
+function hookBox(p) {
+  let box = null;
+  p.el.addEventListener("pointerdown", (ev) => {
+    if (!ev.shiftKey || tool !== "select" || mode !== "edit" || ev.button > 0 || ev.target.closest(".leaflet-marker-icon, .leaflet-control")) return;
+    box = { start: p.map.mouseEventToLatLng(ev), rect: null };
+    p.map.dragging.disable();
+    p.el.setPointerCapture?.(ev.pointerId);
+    ev.preventDefault();
+  });
+  p.el.addEventListener("pointermove", (ev) => {
+    if (!box) return;
+    const now = p.map.mouseEventToLatLng(ev);
+    box.end = now;
+    if (!box.rect) box.rect = L.rectangle(L.latLngBounds(box.start, now), { color: "#ffe066", weight: 1.5, dashArray: "5 4", fillOpacity: 0.08, interactive: false }).addTo(p.draft);
+    else box.rect.setBounds(L.latLngBounds(box.start, now));
+  });
+  const end = () => {
+    if (!box) return;
+    const b = box;
+    box = null;
+    p.map.dragging.enable();
+    if (!b.rect) return;
+    b.rect.remove();
+    boxJustEnded = true;
+    setTimeout(() => { boxJustEnded = false; }, 0);
+    const inside = ED.inBox(markers, p.floor, cellOf(b.start), cellOf(b.end)).filter((m) => canEdit(m));
+    if (selected != null && !multi.size) multi.add(selected);
+    for (const m of inside) multi.add(m.id);
+    if (multi.size === 1) { selected = [...multi][0]; multi.clear(); } else if (multi.size) selected = null;
+    refresh();
+  };
+  p.el.addEventListener("pointerup", end);
+  p.el.addEventListener("pointercancel", end);
+}
+
+// ---- a lever's action: "walls" (each tap adds or takes off a cell), "pulldest" (the tap is where it sends)
+function setPull(id, code) {
+  commit(() => {
+    const n = byId(id);
+    if (!canEdit(n) || (n.fields.pull ?? "") === code) return false;
+    if (code) n.fields.pull = code; else delete n.fields.pull;
+  });
+}
+
+function toggleWall(p, x, z) {
+  const m = byId(destFor);
+  if (!m || p.floor !== m.floor) { toast(t("pull.markHint")); return; }
+  const cur = parseLever(m.fields.pull);
+  const cells = cur.act === "walls" && cur.cells ? cur.cells.map((c) => [...c]) : [];
+  const i = cells.findIndex(([dx, dz]) => dx === x - m.x && dz === z - m.z);
+  if (i >= 0) cells.splice(i, 1);
+  else if (cells.length >= MAX_WALLS) return;
+  else cells.push([x - m.x, z - m.z]);
+  setPull(m.id, leverCode({ act: "walls", secs: cur.act === "walls" ? cur.secs : 0, cells }));
+  paintTools();
+}
+
+function setPullDest(x, z, floor) {
+  const m = byId(destFor);
+  tool = "select";
+  destFor = null;
+  if (!m) { applyTool(); return; }
+  pullPending.delete(m.id);
+  selected = m.id;
+  paintTools();
+  setPull(m.id, leverCode({ act: "send", to: { dx: x - m.x, dz: z - m.z, floor } }));
+}
+
+function startLeverPick(id, what) {
+  if (tool === "route") finishRoute();
+  destFor = id;
+  selected = id;
+  multi.clear();
+  tool = what;
+  applyTool();
+  toast(t(what === "walls" ? "pull.markHint" : "pull.destHint"));
+}
+
 // ------------------------------------------------------------------------------------------------ save and changes
-function changeLines(state) {
+// the change list as lines (rows: each line's change, for Revisar's list)
+function changeLines(state, rows = []) {
   const lines = [];
   const at = (m) => {
     const w = ML.where(m);
@@ -1218,17 +1722,18 @@ function changeLines(state) {
   const what = (m) => {
     const name = KIND_UI[m.kind] ? t("kind." + m.kind) : m.kind;
     const f = m.fields || {};
-    if (m.kind === "spawn") return `${name} ${f.monster || "?"}${f.count ? " ×" + f.count : ""}${f.radius ? " r" + f.radius : ""}`;
+    if (m.kind === "spawn") return `${name} ${f.monster || "?"}${f.count ? " ×" + f.count : ""}${f.radius ? " r" + f.radius : ""}${f.note ? ` ✎ "${f.note}"` : ""}`;
     if (m.kind === "boss" || m.kind === "npc") {
       const who = m.kind === "boss" ? f.monster : f.name;
       return name + (who ? ` "${who}"` : "") + (f.schedule ? ` (🕑 ${scheduleText(f.schedule, t)})` : "") + (f.label ? ` "${f.label}"` : "");
     }
     const extra = (m.cells ? " " + t("cells", m.cells.length) : m.points ? " " + t("points", m.points.length) : "")
-      + (f.combat ? " ⚔ " + t("combatOn") : "");
+      + (f.combat ? " ⚔ " + t("combatOn") : "") + (f.color ? ` (${t("color." + f.color)})` : "");
     const text = f.label || f.text;
-    return name + extra + (text ? ` "${text}"` : "");
+    return name + extra + (text ? ` "${text}"` : "") + (f.pull ? ` 🕹 ${leverText(f.pull, t, m, floorShort)}` : "");
   };
   for (const c of ML.changes(state)) {
+    const before = lines.length;
     const id = "#" + c.id;
     const kind = KIND_UI[c.kind] ? t("kind." + c.kind) : c.kind;
     if (c.op === "added") lines.push(`+ ${id} ${t("added")}: ${what(c.marker)} ${t("at")} ${at(c.marker)}`);
@@ -1247,10 +1752,14 @@ function changeLines(state) {
       else lines.push(`~ ${id} ${kind} ${t("destMoved")}: ${spotText(c.from)} → ${spotText(c.to)}`);
     } else if (c.op === "edited") {
       // a schedule in words (its compact form is for the link only)
-      const v = (x) => (c.field === "schedule" ? scheduleText(x ?? "", t) : x == null ? "∅" : typeof x === "string" ? `"${x}"` : x);
+      // a lever's action and a colour in words too
+      const at0 = state.markers?.find((x) => x.id === c.id) || { x: 0, z: 0 };
+      const v = (x) => (c.field === "schedule" ? scheduleText(x ?? "", t) : c.field === "pull" ? leverText(x, t, at0, floorShort)
+        : c.field === "color" ? t("color." + (x || 0)) : x == null ? "∅" : typeof x === "string" ? `"${x}"` : x);
       if (c.field === "combat") lines.push(`~ ${id} ${kind}: ⚔ ${t(c.new ? "combatOn" : "combatOff")}`);
       else lines.push(`~ ${id} ${kind} ${t("edited")}: ${fieldWord(c.kind, c.field)}: ${v(c.old)} → ${v(c.new)}`);
     } else lines.push(`~ ${id} ${kind} ${t(c.op + "Op")}`);
+    for (let i = before; i < lines.length; i++) rows.push(c);
   }
   return lines;
 }
@@ -1270,31 +1779,70 @@ function linkFor(frag) {
   return location.origin + location.pathname + (qs ? "?" + qs : "") + "#" + frag;
 }
 
+// What Share gives, for the dialog and the status bar's meter alike: the state saved against the link the page opened,
+// its link, and the message for Discord, summary first (the map's name as the link, then what it proposes and its
+// changes counted: the full list opens in the link)
+async function shareParts() {
+  const state = ML.saveState(opened, clone(markers), currentView(), tileVersion, nextId, mapTitle);
+  const frag = await ML.encode(state), url = linkFor(frag), saved = await ML.decode(frag);
+  const message = RV.shareMessage({ title: mapTitle, url, summary: RV.summarize(markers), counts: RV.changeCounts(saved),
+    kindWord: (k) => (KIND_UI[k] ? t("kind." + k) : k), t });
+  return { frag, url, saved, message };
+}
+
 async function save() {
   finishRoute();
-  const state = ML.saveState(opened, clone(markers), currentView(), tileVersion, nextId, mapTitle);
-  const frag = await ML.encode(state);
-  const url = linkFor(frag);
-  // the address bar: the saved link, ?staff kept, ?title dropped (the fragment holds the title now)
-  const here = new URLSearchParams(location.search);
-  here.delete("title");
-  history.replaceState(null, "", location.pathname + (here.toString() ? "?" + here : "") + "#" + frag);
-  const lines = changeLines(await ML.decode(frag));
-  const message = summaryText(lines) + "\n" + url;
   const d = $("dialog");
-  d.textContent = "";
-  const pre = el("pre", {}, message);
-  d.append(el("h2", {}, t("saveTitle")), el("p", {}, t("saveHelp")), pre);
-  // past Discord's 2,000 characters: the file to attach in the ticket instead (the link inside it, unchanged)
-  const over = url.length > LINK_MAX || message.length > LINK_MAX;
-  if (over) d.append(el("p", { class: "warn" }, t("overFile", url.length.toLocaleString(lang), message.length.toLocaleString(lang))));
-  else if (message.length > 1900) d.append(el("p", { class: "warn" }, t("long", message.length)));
-  d.append(el("div", { class: "row" },
-    el("button", { type: "button", onclick: () => copy(url, true) }, t("copyLink")),
-    el("button", { type: "button", class: over ? "" : "primary", onclick: () => copy(message, true) }, t("copyAll")),
-    el("button", { type: "button", class: over ? "primary" : "", "data-act": "download", onclick: () => download(message) }, "⬇ " + t("downloadFile")),
-    el("button", { type: "button", onclick: () => d.close() }, t("close"))));
-  d.showModal();
+  const render = async () => {
+    const { frag, url, saved, message } = await shareParts();
+    // the address bar: the saved link, ?staff kept, ?title dropped (the fragment holds the title now)
+    const here = new URLSearchParams(location.search);
+    here.delete("title");
+    history.replaceState(null, "", location.pathname + (here.toString() ? "?" + here : "") + "#" + frag);
+    const lines = changeLines(saved);
+    // the file (past the limit): the message, then the whole change list (the link inside it, unchanged)
+    const file = message + (lines.length ? "\n\n" + t("fileList") + "\n" + lines.join("\n") : "");
+    d.textContent = "";
+    d.classList.add("share");
+    d.append(el("div", { class: "dh" }, el("h2", {}, t("share")), el("button", { type: "button", class: "x", "aria-label": t("close"), onclick: () => d.close() }, "✕")),
+      el("p", {}, t("saveHelp")));
+    // the map's name (it is the link's text in the message)
+    const name = el("input", { type: "text", maxlength: ML.MAX_TITLE, value: mapTitle, placeholder: t("msg.untitled"), "aria-label": t("shareName"), "data-act": "name" });
+    name.addEventListener("change", () => {
+      const v = ML.cleanTitle(name.value);
+      if (v === mapTitle || mode !== "edit") return;
+      commit(() => { mapTitle = v; });
+      showTitle();
+      render();
+    });
+    name.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); name.blur(); } });
+    if (mode !== "edit") name.readOnly = true;
+    d.append(el("label", { class: "lb" }, t("shareName")), name);
+    // the message as Discord shows it: the name as a link, then the summary lines
+    const [first, ...rest] = message.split("\n");
+    d.append(el("label", { class: "lb" }, t("shareSum")),
+      el("div", { class: "msg", "data-act": "message" }, el("span", { class: "lnk", title: url }, first.slice(1, first.indexOf("]("))),
+        ...rest.map((l) => el("div", {}, l))),
+      el("p", { class: "id" }, t("shareNameHelp")));
+    // the meter: the whole message against Discord's 2,000
+    const n = message.length, level = n > LINK_MAX ? "over" : n >= LINK_WARN ? "near" : "";
+    const bar = el("span", { class: "bar" }, el("i", { style: `width:${Math.min(100, (n / LINK_MAX) * 100).toFixed(1)}%` }));
+    d.append(el("div", { class: "meter2 " + level }, bar, el("span", {}, `${num(n)} / ${num(LINK_MAX)}`)));
+    // what to look at first (Revisar shows each one)
+    const checks = checkRows(RV.warnings(markers));
+    if (checks.length) d.append(el("p", { class: "chkline" }, t("shareChecks", checks.map((c) => c[1]).join(" · ")) + " ",
+      el("button", { type: "button", class: "link", onclick: () => { d.close(); setMode("review"); } }, t("warn.show"))));
+    // past Discord's 2,000 characters: the file to attach in the ticket instead
+    const over = url.length > LINK_MAX || n > LINK_MAX;
+    if (over) d.append(el("p", { class: "warn" }, t("overFile", num(url.length), num(n))));
+    d.append(el("div", { class: "row" },
+      el("button", { type: "button", "data-act": "copylink", onclick: () => copy(url, true) }, t("copyLink")),
+      el("button", { type: "button", class: over ? "" : "primary", "data-act": "copymsg", onclick: () => copy(message, true) }, t("copyAll")),
+      el("button", { type: "button", class: over ? "primary" : "", "data-act": "download", onclick: () => download(file) }, "⬇ " + t("downloadFile")),
+      el("button", { type: "button", onclick: () => d.close() }, t("close"))));
+  };
+  await render();
+  if (!d.open) d.showModal();
 }
 
 // ---- a map as a file: Share downloads the message (the change list and the link) as a .txt to attach on Discord;
@@ -1386,6 +1934,7 @@ function buildFrame() {
   const mapArea = el("div", { id: "mapArea" },
     el("main", { id: "panesBox" }),
     el("div", { id: "subtools", hidden: true }),
+    el("div", { id: "diffBar", class: "float", hidden: true, role: "status" }),
     el("div", { id: "floorCard", role: "region", "aria-label": t("floorsWord") }),
     el("div", { id: "labelsCtl", class: "float" }, el("span", {}, t("labels") + ":"), labelsSeg()));
   const status = el("footer", { id: "coords" },
@@ -1398,7 +1947,7 @@ function buildFrame() {
   document.body.replaceChildren(bar, el("div", { id: "banner", hidden: true }),
     el("div", { id: "work" }, rail, mapArea, el("aside", { id: "panel", hidden: true, "aria-label": t("panelWord") })),
     status, el("div", { id: "toast", hidden: true, role: "status", "aria-live": "polite" }),
-    el("dialog", { id: "dialog" }), el("datalist", { id: "monsterList" }), file);
+    el("dialog", { id: "dialog", onclose: (e) => { e.target.className = ""; } }), el("datalist", { id: "monsterList" }), file);
   buildMenus();
   // a map file dropped anywhere on the page opens it
   addEventListener("dragover", (e) => { if ([...(e.dataTransfer?.types || [])].includes("Files")) e.preventDefault(); });
@@ -1464,8 +2013,9 @@ function setLabels(v) {
   for (const p of panes) drawPane(p);
 }
 
-// Edit / Review. Review this round: look only (nothing moves or changes; the tools wait); what changed, counted and on
-// the map, comes next round.
+// Edit / Review. Revisar is look only (nothing moves or changes; the tools wait): the summary in the panel (what the
+// map proposes, counted, and what to check), and on the map what changed against the link it was saved from (halos on
+// the new and the moved or edited ones, the removed ones faded where they were, "only changes"), counted per floor.
 function setMode(v) {
   if (v === mode) return;
   closeMenus();
@@ -1474,8 +2024,142 @@ function setMode(v) {
   document.body.classList.toggle("review", mode === "review");
   $("mapTitle").readOnly = mode !== "edit";
   paintSeg("data-mode", mode);
-  if (mode === "review") { tool = "select"; destFor = null; toast(t("reviewSoon")); }
+  if (mode === "review") { tool = "select"; destFor = null; destBack = null; multi.clear(); selected = null; summaryClosed = false; reviewTab = "summary"; }
+  ghostShown = null;
   applyTool();
+}
+
+// ---- Revisar: the panel's summary and change list, the bar of changes over the maps
+let summaryClosed = false;
+function summaryPanel(panel) {
+  panel.hidden = false;
+  panel.textContent = "";
+  const diff = reviewDiff(), n = diff.counts.new + diff.counts.edited + diff.counts.removed;
+  panel.append(el("div", { class: "hd" }, el("span", { class: "mk head plain" }, "Σ"), el("h3", {}, t("rv.title")),
+    el("button", { type: "button", class: "x", title: t("close"), "aria-label": t("close"), onclick: () => { summaryClosed = true; refresh(); } }, "✕")));
+  panel.append(el("div", { class: "tabs seg", role: "tablist" },
+    el("button", { type: "button", role: "tab", class: reviewTab === "summary" ? "on" : "", "aria-selected": String(reviewTab === "summary"), "data-tab": "summary", onclick: () => { reviewTab = "summary"; renderPanel(); } }, t("rv.summary")),
+    el("button", { type: "button", role: "tab", class: reviewTab === "changes" ? "on" : "", "aria-selected": String(reviewTab === "changes"), "data-tab": "changes", onclick: () => { reviewTab = "changes"; renderPanel(); } }, t("rv.changes", n))));
+  const body = el("div", { class: "body rv" });
+  panel.append(body);
+  if (reviewTab === "changes") { changeList(body); return; }
+  const s = RV.summarize(markers);
+  body.append(el("div", { class: "tiles" }, [[s.monsters, "rv.monsters"], [s.spawns, "rv.spawns"], [s.species.length, "rv.species"], [s.floors, "rv.floors"]].map(([v, w]) =>
+    el("div", { class: "tile" }, el("b", {}, num(v)), el("span", {}, t(w))))));
+  if (s.context.markers) body.append(el("div", { class: "id" }, t("rv.context", s.context.markers)));
+  // monsters by species, each with a bar split by floor (the floors in one colour each, top to bottom)
+  if (s.species.length) {
+    const floors = [...new Set(s.species.flatMap(([, , f]) => Object.keys(f)))].sort((a, b) => FL.level(b) - FL.level(a));
+    const most = s.species[0][1];
+    body.append(el("div", { class: "fl" }, el("span", {}, t("rv.bySpecies")), el("span", { class: "hint" }, t("rv.byFloor"))));
+    const list = el("div", { class: "species" });
+    for (const [name, total, per] of s.species.slice(0, 10)) {
+      const bar = el("div", { class: "sbar", title: floors.filter((f) => per[f]).map((f) => `${floorShort(f)}: ${per[f]}`).join(" · ") });
+      for (const f of floors) if (per[f]) { const i = el("i", {}); Object.assign(i.style, { width: (per[f] / most) * 100 + "%", background: FLOOR_TINT[floors.indexOf(f) % FLOOR_TINT.length] }); bar.append(i); }
+      list.append(el("div", { class: "sp" }, el("b", {}, String(total)), el("div", {}, el("span", {}, name),
+        el("small", {}, floors.filter((f) => per[f]).map((f) => `${f === "s" ? t("surfaceShort") : f}: ${per[f]}`).join(" · "))), bar));
+    }
+    body.append(list);
+    if (s.species.length > 10) body.append(el("div", { class: "id" }, t("msg.moreSpecies", s.species.length - 10)));
+    body.append(el("div", { class: "keys" }, floors.map((f, i) => el("span", {}, el("i", { style: `background:${FLOOR_TINT[i % FLOOR_TINT.length]}` }), floorShort(f)))));
+  }
+  const objects = Object.entries(s.objects).sort((a, b) => b[1] - a[1]);
+  if (objects.length) {
+    body.append(el("div", { class: "fl" }, el("span", {}, t("rv.objects"))));
+    body.append(el("div", { class: "chips" }, objects.map(([k, c]) => el("span", { class: "chip" }, dotNode(k, "mk mini"), KIND_UI[k] ? t("kind." + k) : k, el("i", {}, String(c))))));
+  }
+  // before sending: what to look at, each with "show" (the next one on each click)
+  body.append(el("div", { class: "fl" }, el("span", {}, t("rv.checks"))));
+  const rows = checkRows(RV.warnings(markers));
+  if (!rows.length) body.append(el("div", { class: "preview ok" }, "✓ " + t("rv.noChecks")));
+  else body.append(el("div", { class: "checks" }, rows.map(([key, text, ids]) => el("div", { class: "chk" }, "⚠ " + text + " ",
+    el("button", { type: "button", class: "link", "data-check": key, onclick: () => showCheck(key, ids) }, t("warn.show"))))));
+  body.append(el("div", { class: "row" }, el("button", { type: "button", onclick: () => copy(summaryLines(), true) }, t("rv.copy"))));
+}
+
+const FLOOR_TINT = ["#3e8ef7", "#30a46c", "#f5a524", "#e5484d", "#8e4ec6", "#12a594", "#e93d82", "#978365"];
+const num = (v) => Number(v).toLocaleString(lang);
+
+// the checks as rows: [key, words, ids]
+function checkRows(w) {
+  const rows = [];
+  for (const [kind, ids] of Object.entries(w.noDest)) rows.push(["dest-" + kind, t("warn.noDest", ids.length, t("kind." + kind)), ids]);
+  const one = (key, ids) => t(ids.length === 1 ? key + "1" : key, ids.length);
+  if (w.noteNearSpawn.length) rows.push(["note", one("warn.noteSpawn", w.noteNearSpawn), w.noteNearSpawn]);
+  if (w.leverNone.length) rows.push(["lever", one("warn.leverNone", w.leverNone), w.leverNone]);
+  if (w.leverAreaGone.length) rows.push(["leverArea", one("warn.leverArea", w.leverAreaGone), w.leverAreaGone]);
+  return rows;
+}
+// "show": the check's next marker, centred and selected
+function showCheck(key, ids) {
+  const i = ((warnAt[key] ?? -1) + 1) % ids.length;
+  warnAt[key] = i;
+  const m = byId(ids[i]), w = m && ML.where(m);
+  if (w) goTo(w[0], w[1], m.floor, m.id);
+}
+
+// the summary as text (Copy summary): the message Share writes, without the link
+function summaryLines() {
+  return RV.shareMessage({ title: mapTitle, url: "", summary: RV.summarize(markers), counts: reviewDiff().counts, kindWord: (k) => t("kind." + k), t })
+    .split("\n").slice(1).join("\n");
+}
+
+// the changes against the link this one was saved from, one line each; a click goes to it
+function changeList(body) {
+  const state = reviewState(), rows = [];
+  const lines = changeLines(state, rows);
+  body.append(el("div", { class: "id" }, t("rv.against")));
+  if (!lines.length) { body.append(el("div", { class: "preview" }, t("rv.noneYet"))); return; }
+  const list = el("div", { class: "changes" });
+  lines.forEach((line, i) => {
+    const c = rows[i], m = c.op === "removed" ? c.marker : byId(c.id), w = m && ML.where(m);
+    list.append(el("button", { type: "button", class: "ch " + (c.op === "added" ? "new" : c.op === "removed" ? "removed" : "edited"),
+      onclick: () => { if (!w) return; if (c.op === "removed") { goTo(w[0], w[1], m.floor); ghostShown = m; renderPanel(); } else goTo(w[0], w[1], m.floor, m.id); } }, line));
+  });
+  body.append(list);
+}
+// the map now as a link saved against the one it came from (its change list: Revisar's)
+function reviewState() {
+  return ML.saveState({ markers: baseMarkers, next: linkState ? linkState.base ?? 0 : 0 }, clone(markers), currentView(), tileVersion, nextId, mapTitle);
+}
+
+// a selected marker in Revisar: what changed in it, and back to the summary
+function reviewNote(body, m) {
+  const st = rvStatus(m);
+  if (st) {
+    const rows = [], lines = changeLines(reviewState(), rows).filter((_, i) => rows[i].id === m.id);
+    body.append(el("div", { class: "rvnote " + st }, el("b", {}, t(st === "new" ? "rv.isNew" : "rv.isEdited")),
+      ...(st === "edited" ? lines.map((l) => el("div", { class: "id" }, l.replace(/^~ #\d+ /, ""))) : [])));
+  }
+  body.append(el("div", { class: "row tight" }, el("button", { type: "button", "data-act": "back", onclick: () => { selected = null; summaryClosed = false; refresh(); } }, t("rv.back"))));
+}
+function ghostPanel(panel, m) {
+  panel.hidden = false;
+  panel.textContent = "";
+  panel.append(el("div", { class: "hd" }, dotNode(m.kind in KIND_UI ? m.kind : "?", "mk head"), el("h3", {}, KIND_UI[m.kind] ? t("kind." + m.kind) : m.kind),
+    el("span", { class: "id" }, "#" + m.id), el("button", { type: "button", class: "x", "aria-label": t("close"), onclick: () => { ghostShown = null; refresh(); } }, "✕")));
+  const w = ML.where(m), rows = [];
+  const line = changeLines(reviewState(), rows).find((_, i) => rows[i].id === m.id && rows[i].op === "removed");
+  panel.append(el("div", { class: "body" }, el("div", { class: "rvnote removed" }, el("b", {}, t("rv.isRemoved"))),
+    line ? el("div", { class: "id" }, line.replace(/^- #\d+ /, "")) : null,
+    w ? el("div", { class: "id" }, `${floorShort(m.floor)} · x ${w[0]}, z ${w[1]}`) : null,
+    el("div", { class: "row tight" }, el("button", { type: "button", onclick: () => { ghostShown = null; refresh(); } }, t("rv.back")))));
+}
+
+// the bar over the maps in Revisar: the changes counted (each a halo colour), All / Only changes
+function paintDiffBar() {
+  const bar = $("diffBar");
+  if (!bar) return;
+  bar.hidden = mode !== "review";
+  if (bar.hidden) return;
+  const c = reviewDiff().counts;
+  bar.textContent = "";
+  bar.append(el("b", {}, t("rv.diff")),
+    el("span", { class: "dc new" }, el("i"), `${t("rv.new")} ${c.new}`),
+    el("span", { class: "dc edited" }, el("i"), `${t("rv.edited")} ${c.edited}`),
+    el("span", { class: "dc removed" }, el("i"), `${t("rv.removed")} ${c.removed}`),
+    segOf("data-rvonly", [["0", t("rv.all")], ["1", t("rv.only")]], reviewOnly ? "1" : "0", (v) => { reviewOnly = v === "1"; refresh(); }, t("rv.only")));
+  if (summaryClosed && selected == null) bar.append(el("button", { type: "button", class: "chip", onclick: () => { summaryClosed = false; refresh(); } }, "Σ " + t("rv.summary")));
 }
 
 // ---- the floors card: every floor with markers and how many; the floors shown (with their pane's number when side
@@ -1498,8 +2182,12 @@ function paintFloorCard() {
   const empty = tileMeta.floors.filter((f) => !withMarkers.includes(f));
   const list = el("div", { class: "rows" });
   const links = FL.floorLinks(markers);
+  // Revisar: each floor's changes (+ new, ~ moved or edited, − removed), and floors where only something was removed
+  const fc = mode === "review" ? RV.floorChanges(reviewDiff(), markers) : {};
+  for (const f of Object.keys(fc)) if (!withMarkers.includes(f)) withMarkers.push(f);
+  withMarkers.sort((a, b) => tileMeta.floors.indexOf(a) - tileMeta.floors.indexOf(b));
   for (const f of floorsOpen ? tileMeta.floors : withMarkers) {
-    const ins = shownIn(f), to = links[f] || [];
+    const ins = shownIn(f), to = links[f] || [], ch = fc[f];
     const row = el("button", { type: "button", "data-floor": f,
       class: "f" + (target.floor === f ? " on" : ins.length ? " shown" : "") + (counts[f] ? "" : " empty"),
       "aria-pressed": String(target.floor === f), title: floorLabel(f) + (to.length ? " · " + t("floorLinksTo", to.map(floorShort).join(", ")) : ""),
@@ -1507,6 +2195,9 @@ function paintFloorCard() {
     el("b", {}, floorShort(f)),
     panes.length > 1 && ins.length ? el("span", { class: "pn" }, ins.join("·")) : null,
     counts[f] ? el("span", { class: "c" }, String(counts[f])) : null,
+    ch ? el("small", { class: "rvc", title: `${t("rv.new")} ${ch.new} · ${t("rv.edited")} ${ch.edited} · ${t("rv.removed")} ${ch.removed}` },
+      ch.new ? el("span", { class: "new" }, "+" + ch.new) : null, ch.edited ? el("span", { class: "edited" }, "~" + ch.edited) : null,
+      ch.removed ? el("span", { class: "removed" }, "−" + ch.removed) : null) : null,
     // where this floor's ropes, holes and portals lead (and what leads here)
     to.length ? el("small", { class: "to" }, "⇅ " + to.map((x) => (x === "s" ? t("surfaceShort") : x)).join(" · ")) : null);
     row.addEventListener("pointerenter", (e) => { if (e.pointerType === "mouse") showPreview(f, row); });
@@ -1590,11 +2281,10 @@ async function measureLink() {
   const seq = ++meterSeq;
   let link, msg;
   try {
-    // what Share gives: the link, and the message (the change list and the link) that goes to Discord
-    const state = ML.saveState(opened, clone(markers), currentView(), tileVersion, nextId, mapTitle);
-    const frag = await ML.encode(state), url = linkFor(frag);
+    // what Share gives: the link, and the message (the summary with the link) that goes to Discord
+    const { url, message } = await shareParts();
     link = url.length;
-    msg = (summaryText(changeLines(await ML.decode(frag))) + "\n" + url).length;
+    msg = message.length;
   } catch { return; }
   if (seq !== meterSeq) return;
   const n = Math.max(link, msg), num = (v) => v.toLocaleString(lang);
@@ -1757,13 +2447,15 @@ function buildBar() {
     else if (e.target.closest("input, textarea, select")) return;
     if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
+    else if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); duplicateSel(); }   // (the browser's bookmark key)
     else if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
     else if (e.key === "Enter" && tool === "route") finishRoute();
     else if (!mod && (e.key === "PageUp" || e.key === "]" || e.key === "}")) { e.preventDefault(); stepFloor(activePane || panes[0], -1, e.shiftKey); }
     else if (!mod && (e.key === "PageDown" || e.key === "[" || e.key === "{")) { e.preventDefault(); stepFloor(activePane || panes[0], 1, e.shiftKey); }
     else if (e.key === "Escape" && closeMenus()) return;
-    else if (e.key === "Escape" && tool === "dest") endDestPick();
-    else if (e.key === "Escape") { draftRoute = null; selected = null; if (tool !== "select") setTool("select"); else refresh(); }
+    else if (e.key === "Escape" && tool === "dest") { destBack = null; endDestPick(); }
+    else if (e.key === "Escape" && ["walls", "pulldest", "movegroup"].includes(tool)) endPick();
+    else if (e.key === "Escape") { draftRoute = null; selected = null; multi.clear(); ghostShown = null; if (tool !== "select") setTool("select"); else refresh(); }
   });
   window.addEventListener("hashchange", () => location.reload());
   hookPanel();
@@ -1786,6 +2478,9 @@ async function start() {
     // a player's Save always compares with the link staff sent (rebuilt from the saved link's own change list, so a
     // reload after a Save loses nothing); staff (?staff=1) start a new round from the link as it is
     opened = STAFF ? state : ML.baselineOf(state);
+    // Revisar compares with the link this one was saved from, for players and staff alike
+    linkState = state;
+    baseMarkers = ML.baselineOf(state).markers;
     markers = clone(state.markers);
     nextId = state.next;
     view = state.view;
@@ -1802,7 +2497,7 @@ async function start() {
   buildPanes(view.floors, view);
   // read-only hooks for the page's browser tests
   Object.defineProperty(window, "__panes", { get: () => panes });   // the panes now (side by side rebuilds them)
-  window.__state = () => ({ markers: clone(markers), nextId, selected, tool, destFor });
+  window.__state = () => ({ markers: clone(markers), nextId, selected, tool, destFor, multi: [...multi], stamp: { ...stamp }, mode, undo: undoStack.length });
   window.addEventListener("resize", drawLinksSoon);
 }
 

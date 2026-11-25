@@ -117,9 +117,7 @@ export function shareMessage({ title, url, summary, counts, kindWord, t, species
   const objects = Object.entries(summary.objects).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   if (objects.length) out.push(objects.map(([k, n]) => `${kindWord(k)} ${n}`).join(" · "));
   const parts = [];
-  if (counts.new) parts.push(t("msg.new", counts.new));
-  if (counts.edited) parts.push(t("msg.edited", counts.edited));
-  if (counts.removed) parts.push(t("msg.removed", counts.removed));
+  for (const k of ["new", "edited", "removed"]) if (counts[k]) parts.push(t(counts[k] === 1 ? `msg.${k}1` : `msg.${k}`, counts[k]));
   out.push(parts.length ? t("msg.changes", parts.join(" · ")) : t("msg.noChanges"));
   return out.join("\n");
 }
