@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Opengea Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"
+      integrity="sha512-Zcn6bjR/8RZbLEpLIeOwNtzREBAJnUKESxces60Mpoj+2okopSAcSUIUOseddDm0cxnGQzxIR7vJgsLZbdLE3w=="
+      crossorigin="anonymous" referrerpolicy="no-referrer">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"
+        integrity="sha512-BwHfrr4c9kmRkLw6iXFdzcdWV/PGkVgiIyIWLLlTSXzWQzxuSg4DiQUCpauz/EWjgk5TYQqX/kvn9pG1NpYfqg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<header id="bar">
+  <div id="tools" role="toolbar"></div>
+  <div id="subtools"></div>
+  <div id="actions">
+    <button id="undo" type="button"></button>
+    <button id="redo" type="button"></button>
+    <button id="save" type="button" class="primary"></button>
+  </div>
+  <div id="settings">
+    <label><span id="panesLabel"></span> <select id="panes"><option>1</option><option>2</option><option>3</option></select></label>
+    <select id="lang" aria-label="Language"></select>
+  </div>
+</header>
+<div id="banner" hidden></div>
+<main id="panesBox"></main>
+<aside id="panel" hidden></aside>
+<footer id="coords"></footer>
+<div id="toast" hidden></div>
+<dialog id="dialog"></dialog>
+<datalist id="monsterList"></datalist>
+</body>
+</html>
