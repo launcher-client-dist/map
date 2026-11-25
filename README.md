@@ -27,15 +27,31 @@ and posts the new link (with its list of changes) back in their ticket.
   `?title=...` gives one to a link that has none.
 - **Coordinates:** the status bar shows the cell under the cursor (a click on it copies its `/pos`-style line); a click
   on the map in Select copies it too.
-- **Link size:** the status bar shows the link's length live (and the message's, the change list and the link, when it
-  is longer), amber from 1,800 characters and red past Discord's 2,000. Past it, **Share** offers **Download file**: a
-  `.txt` with the message, to attach in the ticket. **Open a file** (or a file dropped on the page) opens the link in
-  it.
-- **Review:** look only (nothing moves or changes); what changed, counted and on the map, comes in a next version.
+- **Link size:** the status bar shows the link's length live (and Share's message's), amber from 1,800 characters and
+  red past Discord's 2,000. Past it, **Share** offers **Download file**: a `.txt` with the message and the whole change
+  list, to attach in the ticket. **Open a file** (or a file dropped on the page) opens the link in it.
+- **Stamp mode:** a place tool stays armed after each click (Esc, Select or **Done** ends it). For spawns the bar over
+  the map holds what the next one gets: the monster (typed, or a chip of the ones on this map), how many and the radius;
+  editing or tapping a spawn sets them too. A rope, hole or portal asks where it leads, then the tool is armed again.
+  On a phone the bar sits at the bottom and a placed spawn opens no drawer.
+- **Several at once:** Shift+click adds or takes off a marker, Shift+drag selects a box (locked context markers stay
+  out). The panel then offers **Move** (then a tap: the group's middle goes there, on that pane's floor), **Duplicate**
+  (also Ctrl+D, for one marker too: copies a little apart, selected), **To floor** and **Delete**; dragging one of them
+  moves them all. Each is one undo step.
+- **Review** (for everyone): look only (nothing moves or changes). The panel sums up what the map proposes (monsters,
+  spawns, species, floors, the locked context apart; monsters by species with a bar per floor; objects) and what to
+  check before sending (ropes, holes and portals without a destination, notes next to a spawn, levers with no action
+  or whose area is gone; **show** goes to each). On the map, what changed against the link this one was saved from:
+  a green halo on the new ones, amber on the moved or edited, the removed ones faded where they were; **Only changes**
+  hides the rest; the floors card counts the changes per floor; the **Changes** tab lists them (a click goes there).
+- **Share:** the map's name (editable there), the message as Discord shows it, summary first: the name as the link,
+  what it proposes and its objects, its changes counted (the list opens in the link's "View"); the meter; what to check.
 - **Markers:** monster spawn (the monster typed, or picked from the ones already on this map; how many, − / +; the
-  radius as buttons, the circle and a sentence saying what it means; how many of that monster the map holds), boss (picked from the game's bosses or any name typed, when
+  radius as buttons, the circle and a sentence saying what it means; how many of that monster the map holds; an
+  **observation**, shown under its name with ✎ on the marker), boss (picked from the game's bosses or any name typed, when
   it comes, a note: a crown in a ringed disc, the schedule under its name), point, area (paint cells: brush, rectangle,
-  erase), route, note. Select one to drag it, change its fields or delete it. Undo/redo: the buttons, Ctrl+Z, Ctrl+Y.
+  erase; a **colour** from swatches), route, note. Select one to drag it, change its fields or delete it. Undo/redo: the
+  buttons, Ctrl+Z, Ctrl+Y.
 - **Map things:** rope, two-way rope, lever, hole, door, portal, elevator, NPC (name, when it is there, what it sells
   or does) (in the rail, one click each; on a phone the **Objects** menu; **Legend** shows what each marker is). A two-way rope (goes and comes back) is
   drawn with a head at both ends of its arrow and ↔ on its label; a rope's panel turns it two-way and back.
@@ -49,10 +65,15 @@ and posts the new link (with its list of changes) back in their ticket.
   later). Later: select it, then
   **Change**, **View**, **Remove**, or its destination floor in the panel; drag the small end marker to move it. Same
   floor: a dashed arrow. Another floor: "leads to floor N" on its label, the end marker on that floor, and an arrow
-  across the panes when both floors are shown.
+  across the panes when both floors are shown. A portal can wear the game's purple, blue or red (its marker and arrow).
+- **A lever's action** ("When pulled"): Not said / **Opens walls** / **Takes the player**. Walls: the cells marked on the
+  map (each tap adds or takes off one, at most 32) or an area of the map, and **Toggle** (open until pulled again, the
+  game's default) or **Timed** (10 / 30 / 60 / 120 s or another number); drawn as hatched cells with a line from the
+  lever. Takes the player: a tap on any floor shown; drawn like a rope's arrow. A sentence says what it does.
 - **Locked markers** (🔒) are context: shown, but they can't be moved or changed.
-- **Save** gives the link and a summary of what changed against the link you opened: added, moved (from → to), edited
-  (field: old → new), removed, a destination set, moved or removed, and a rope made two-way (or one-way).
+- **The change list** (the banner's "View", Review's Changes tab, the file) says what changed against the link you
+  opened: added, moved (from → to), edited (field: old → new; a lever's action and a colour in words), removed, a
+  destination set, moved or removed, and a rope made two-way (or one-way).
 - **Language:** Português, English, Español, 中文 (`?lang=pt|en|es|zh`, else the browser's).
 
 ## The link
@@ -75,7 +96,10 @@ unchanged and ignores the title. The two-way rope, the boss and the NPC (codes 1
 a length and a format-1 body, so the page before them keeps such a marker unchanged too. The combat lock is an
 "extra" field of the core kinds: in format 2 the records end with link flag 1's extra fields (every format-2 page reads
 past them; one from before drops only the lock), in format 1 a field key an older page skips; unset, a link is byte
-for byte what it was.
+for byte what it was. A spawn's observation, an area's and a portal's colour (an index in `COLORS`) and a lever's
+action (`lever.js`: a short code with its cells relative to the lever, so moving or duplicating it carries the action)
+are extra fields the same way: a map that uses none of them keeps its exact bytes; each costs a few characters when
+used (a colour about 4, a lever's area about 8, an observation its deflated text).
 
 Two made-up format-1 examples, which still open (a locked area "A", a spawn, a point and a note):
 `https://map.opengea.tech/?lang=en#1.Y2QIKGdhZGBhYWFiYGTgZU63YWJiACFGRkegAANvVCMjI0t4fk4aEwcLGyMTAwNHSi4jS0ZqUSoLMwMDv1s3IyNXcUFieZ5CZkpqIgMA`
@@ -96,6 +120,8 @@ The same two maps saved as format 2:
   window to prefill); `schedule.js`: the schedule codes and their words (no DOM).
 - `floors.js`: which floor a step, a new pane or an opened link goes to, the counts and the rope links per floor;
   `goto.js`: what a text in Go to means (a `/pos`, `x, z`, a floor, a search). No DOM; `tests/ui.test.mjs`.
+- `lever.js`: a lever's action code and its words; `review.js`: the summary, the checks, the diff and Share's
+  message; `edits.js`: moving, duplicating and boxing several markers. No DOM; `tests/review.test.mjs`.
 - `tiles/<client version>/<floor>/<zoom>/<x>_<y>.png`: the map, one set per game client version so an old link opens
   on its own map; `tiles/index.json` lists the sets, `tiles/<version>/meta.json` the floors and tiles. Floor `s` is the
   surface; the others are slices by height. Only the coloured pictures are published.
