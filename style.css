@@ -338,4 +338,5 @@ ul.legend li span { color: var(--muted); font-size: 13px; }
   #meter .bar { width: 44px; }
   #toast { bottom: auto; top: calc(var(--bar-h) + 8px); }
   #floorCard .rows { flex: 1; min-width: 0; }
+  #floorCard .f .to { display: none; }
 }

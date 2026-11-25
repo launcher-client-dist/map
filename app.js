@@ -1515,7 +1515,7 @@ function paintFloorCard() {
     list.append(row);
   }
   card.append(list);
-  if (empty.length) card.append(el("button", { type: "button", class: "more", onclick: () => { floorsOpen = !floorsOpen; paintFloorCard(); } },
+  if (empty.length) list.append(el("button", { type: "button", class: "more", onclick: () => { floorsOpen = !floorsOpen; paintFloorCard(); } },
     floorsOpen ? t("floorsLess") : t("floorsMore", empty.filter((f) => !shownIn(f).length).length)));
   card.append(el("div", { class: "side" }, el("span", {}, t("sideBySide")), panesSeg()));
   paintPaneCount();
