@@ -10,6 +10,7 @@ import { BOSSES, bossOf } from "./bosses.js";
 import { parseLever, leverCode, leverText, wallCells, rebased, MAX_WALLS } from "./lever.js";
 import * as RV from "./review.js";
 import * as ED from "./edits.js";
+import * as DR from "./draft.js";
 
 const lang = pickLang();
 const t = translator(lang);
@@ -179,10 +180,46 @@ function commit(fn) {
   if (undoStack.length > 300) undoStack.shift();
   redoStack.length = 0;
   refresh();
+  keepSoon();
 }
 // (Review is look only: no undo or redo there either)
-function undo() { if (!undoStack.length || mode !== "edit") return; redoStack.push(snapshot()); restore(undoStack.pop()); refresh(); }
-function redo() { if (!redoStack.length || mode !== "edit") return; undoStack.push(snapshot()); restore(redoStack.pop()); refresh(); }
+function undo() { if (!undoStack.length || mode !== "edit") return; redoStack.push(snapshot()); restore(undoStack.pop()); refresh(); keepSoon(); }
+function redo() { if (!redoStack.length || mode !== "edit") return; undoStack.push(snapshot()); restore(redoStack.pop()); refresh(); keepSoon(); }
+
+// ---- the work is never only on screen: after each edit (KEEP_MS later) the address bar holds the state Share would
+// give (a reload keeps it) and this browser keeps it as the opened link's draft (draft.js: opening that link again
+// offers it back); leaving the page with edits not yet copied or downloaded from Share asks first
+const KEEP_MS = 400;
+let drafts = null, draftKey = "new", openedTitle = "";
+let unshared = false;   // edits since the last Copy or Download in Share
+let leaving = false;    // the page itself is opening another link (a draft, a file): no question
+let keepTimer = 0, keepSeq = 0;
+function keepSoon() {
+  clearTimeout(keepTimer);
+  keepTimer = setTimeout(keep, KEEP_MS);
+}
+async function keep() {
+  clearTimeout(keepTimer);
+  if (!tileMeta || !drafts) return;
+  const seq = ++keepSeq;
+  let frag, state;
+  try {
+    state = ML.saveState(opened, clone(markers), currentView(), tileVersion, nextId, mapTitle);
+    frag = await ML.encode(state);
+  } catch { return; }
+  if (seq !== keepSeq) return;
+  setAddress(frag);
+  const work = ML.changes(state).length > 0 || ML.cleanTitle(mapTitle) !== openedTitle;
+  if (work) drafts.put(draftKey, { frag, at: Date.now(), sig: DR.signature(markers, mapTitle), changes: ML.changes(state).length });
+  else drafts.drop(draftKey);
+  unshared = work;
+}
+// the address bar on a fragment: ?staff kept, ?title dropped (the fragment holds the title); no reload, no history step
+function setAddress(frag) {
+  const here = new URLSearchParams(location.search);
+  here.delete("title");
+  history.replaceState(null, "", location.pathname + (here.toString() ? "?" + here : "") + "#" + frag);
+}
 
 // ------------------------------------------------------------------------------------------------ tiles
 const TileLayer = L.TileLayer.extend({
@@ -1810,13 +1847,12 @@ async function save() {
   // the dialog's buttons act on what it shows now: a name typed and then a click on Copy (the name's change fires
   // between the press and the click, and starts a new render) waits for that render and copies its message
   let cur = null, pending = null;
-  const act = (k, fn) => async () => { await pending; fn(cur[k]); };
+  // (a copy or a download: the work has left the page, leaving it no longer asks)
+  const act = (k, fn) => async () => { await pending; fn(cur[k]); unshared = false; };
   const render = async () => {
     const { frag, url, saved, message } = await shareParts();
     // the address bar: the saved link, ?staff kept, ?title dropped (the fragment holds the title now)
-    const here = new URLSearchParams(location.search);
-    here.delete("title");
-    history.replaceState(null, "", location.pathname + (here.toString() ? "?" + here : "") + "#" + frag);
+    setAddress(frag);
     const lines = changeLines(saved);
     // the file (past the limit): the message, then the whole change list (the link inside it, unchanged)
     const file = message + (lines.length ? "\n\n" + t("fileList") + "\n" + lines.join("\n") : "");
@@ -1883,6 +1919,7 @@ function linkIn(text) {
 }
 
 function openLinkFrag(frag) {
+  leaving = true;   // (the work is in this browser's draft: opening a link asks nothing)
   if ("#" + frag === location.hash) { location.reload(); return; }
   location.hash = frag;   // hashchange: the page reloads on it
 }
@@ -2477,8 +2514,24 @@ function buildBar() {
     else if (e.key === "Escape" && ["walls", "pulldest", "movegroup"].includes(tool)) endPick();
     else if (e.key === "Escape") { draftRoute = null; selected = null; multi.clear(); ghostShown = null; if (tool !== "select") setTool("select"); else refresh(); }
   });
-  window.addEventListener("hashchange", () => location.reload());
+  window.addEventListener("hashchange", () => { leaving = true; location.reload(); });
+  // closing or reloading with edits not copied or downloaded from Share: the browser asks (its own words); the draft
+  // is kept either way, and written at once when the page is hidden (a closed tab may never run a pending timer)
+  window.addEventListener("beforeunload", (e) => { if (unshared && !leaving) { e.preventDefault(); e.returnValue = ""; } });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && keepTimer) keep(); });
   hookPanel();
+}
+
+// a Storage for a visit whose browser blocks localStorage (the same calls, in memory)
+function memoryStorage() {
+  const m = new Map();
+  return {
+    get length() { return m.size; },
+    key: (i) => [...m.keys()][i] ?? null,
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => { m.set(k, String(v)); },
+    removeItem: (k) => { m.delete(k); },
+  };
 }
 
 async function start() {
@@ -2513,7 +2566,19 @@ async function start() {
   }
   // the title: the link's own, else ?title= (someone's text either way: cleaned, shown as text only)
   mapTitle = state?.title || ML.cleanTitle(new URLSearchParams(location.search).get("title"));
+  openedTitle = ML.cleanTitle(mapTitle);
   showTitle();
+  // this link's draft in this browser (draft.js): offered back when it holds work this link doesn't
+  let storage = null;
+  try { storage = window.localStorage; } catch { /* blocked site data: drafts for this visit only */ }
+  drafts = DR.store(storage || memoryStorage());
+  draftKey = DR.draftKey(state);
+  const offer = DR.toOffer(drafts, draftKey, DR.signature(markers, mapTitle));
+  if (offer) {
+    banner(t("draftFound", DR.whenText(offer.at, Date.now(), lang)), "draft", el("span", { class: "bbtns" },
+      el("button", { type: "button", class: "primary", "data-act": "draft-restore", onclick: () => openLinkFrag(offer.frag) }, t("draftRestore")),
+      el("button", { type: "button", "data-act": "draft-discard", onclick: () => { drafts.drop(draftKey); $("banner").hidden = true; toast(t("draftGone")); } }, t("draftDiscard"))));
+  }
   buildPanes(view.floors, view);
   // read-only hooks for the page's browser tests
   Object.defineProperty(window, "__panes", { get: () => panes });   // the panes now (side by side rebuilds them)
