@@ -6,17 +6,38 @@ and posts the new link (with its list of changes) back in their ticket.
 
 ## Using it
 
-- **Floors:** the selector over each map, and its ▲ ▼ buttons for the floor above or below (the next one with map in
-  view; the view stays put; keys PageUp/PageDown or `]` `[` move the pane last pointed at); "Floors side by side"
-  shows 2 or 3 at once, moving together.
+- **The page:** the bar on one line (the map's name, **Go to**, Edit / Review, undo, redo, language, open a file,
+  **Share**); the tools in a rail on the left (on a phone: Select, Spawn, Objects, Note, More at the bottom); the
+  marker's panel docked on the right (on a phone a drawer); the status bar at the bottom. `app.js` builds all of it, so
+  an older cached `index.html` still works.
+- **Floors:** the floors card over the maps lists every floor with markers and how many, the floors each one's ropes
+  and portals join (⇅), a preview on hover, "+ N floors without markers", and 1 / 2 / 3 floors side by side (a new
+  pane opens on the next floor down with markers, else the next with map in view). A click shows the floor in the pane
+  last clicked and brings its markers into view. Each pane's selector shows the counts too; its ▲ ▼ go up or down by
+  height (the surface between floor 0 and floor 1) to the next floor that matters (markers, or a rope's end), else the
+  next with map in view, and their tooltip names it; Shift goes to every floor with map. Keys: PageUp/PageDown or `]`
+  `[`. A link opens on its saved floors, any of them without markers swapped for the busiest one.
+- **Go to** (Ctrl+K or `/`): paste the game's `/pos` line (or the page's, or `x, z`, or `x, y, z`): go there on the floor
+  it names (the game prints "floor N" on the surface too, so the page offers that floor first when it has map at the
+  spot, and the surface), **Mark here**, and the markers near it. Also a floor ("andar -4"), a marker by name or
+  monster, or a map link to open.
+- **Labels:** Auto (on hover, the selected marker, wide areas, and every name from zoom 4 in), Always, Never (on
+  hover); this browser remembers it. A spawn of several monsters shows ×N on its marker.
 - **Title:** the box in the bar names the map; the browser tab shows it ("Title - Opengea Map"). A link carries it;
   `?title=...` gives one to a link that has none.
-- **Coordinates:** the bar at the bottom shows the cell under the cursor; a click on the map copies a `/pos`-style line.
-- **Markers:** monster spawn (monster, how many, radius), boss (picked from the game's bosses or any name typed, when
+- **Coordinates:** the status bar shows the cell under the cursor (a click on it copies its `/pos`-style line); a click
+  on the map in Select copies it too.
+- **Link size:** the status bar shows the link's length live (and the message's, the change list and the link, when it
+  is longer), amber from 1,800 characters and red past Discord's 2,000. Past it, **Share** offers **Download file**: a
+  `.txt` with the message, to attach in the ticket. **Open a file** (or a file dropped on the page) opens the link in
+  it.
+- **Review:** look only (nothing moves or changes); what changed, counted and on the map, comes in a next version.
+- **Markers:** monster spawn (the monster typed, or picked from the ones already on this map; how many, − / +; the
+  radius as buttons, the circle and a sentence saying what it means; how many of that monster the map holds), boss (picked from the game's bosses or any name typed, when
   it comes, a note: a crown in a ringed disc, the schedule under its name), point, area (paint cells: brush, rectangle,
   erase), route, note. Select one to drag it, change its fields or delete it. Undo/redo: the buttons, Ctrl+Z, Ctrl+Y.
 - **Map things:** rope, two-way rope, lever, hole, door, portal, elevator, NPC (name, when it is there, what it sells
-  or does) (the **Objects** menu in the bar; **?** shows what each marker is). A two-way rope (goes and comes back) is
+  or does) (in the rail, one click each; on a phone the **Objects** menu; **Legend** shows what each marker is). A two-way rope (goes and comes back) is
   drawn with a head at both ends of its arrow and ↔ on its label; a rope's panel turns it two-way and back.
 - **Schedules** (boss, NPC): a picker, Always / Every hour at minute :MM (real clock) / Game time from HH to HH (Day,
   Night), with the words it will show under it (one game day is one real hour: the game window's real minutes too).
@@ -73,6 +94,8 @@ The same two maps saved as format 2:
 - `maplink.js`: the link format, no DOM (`npm test` runs `tests/` under Node).
 - `i18n.js`: the words; `monsters.js`: monster names for spawn markers; `bosses.js`: the bosses' names (and a fixed
   window to prefill); `schedule.js`: the schedule codes and their words (no DOM).
+- `floors.js`: which floor a step, a new pane or an opened link goes to, the counts and the rope links per floor;
+  `goto.js`: what a text in Go to means (a `/pos`, `x, z`, a floor, a search). No DOM; `tests/ui.test.mjs`.
 - `tiles/<client version>/<floor>/<zoom>/<x>_<y>.png`: the map, one set per game client version so an old link opens
   on its own map; `tiles/index.json` lists the sets, `tiles/<version>/meta.json` the floors and tiles. Floor `s` is the
   surface; the others are slices by height. Only the coloured pictures are published.
