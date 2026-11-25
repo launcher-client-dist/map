@@ -22,17 +22,18 @@ function hash(bytes) {
 const bytesOf = (markers, next, title) => payloadOf({ tiles: "", view: { x: 0, z: 0, zoom: 0, floors: ["s"] }, base: next, next,
   markers: [...markers].sort((a, b) => a.id - b.id), was: [], title: cleanTitle(title) }, 1);
 
-// The draft key of an opened link's decoded state (null: a page opened with no link: one draft for a new map)
+// The draft key of an opened link's decoded state (null: a page opened with no link: an empty map, the same key as
+// the link its first edit writes into the address bar, whose baseline is empty too)
 export function draftKey(state) {
-  if (!state) return "new";
-  const b = baselineOf(state);
+  const b = state ? baselineOf(state) : { markers: [], next: 0 };
   // (a reviewer's flags are no other map: the flagged link shares the draft of the link it flags)
   return hash(bytesOf(b.markers.map(unflagged), b.next ?? 0, ""));
 }
 
-// What a map holds now (its markers and title): a draft differing from the link being opened is offered back
+// What a map holds now (its markers and title), flags left out: a draft differing from the link being opened is
+// offered back (a flagged link and its owner's draft of the same work: nothing to offer)
 export function signature(markers, title) {
-  return hash(bytesOf(markers, 0, title));
+  return hash(bytesOf(markers.map(unflagged), 0, title));
 }
 
 // The store over a Storage-like object (getItem, setItem, removeItem, key, length); every call survives a storage that

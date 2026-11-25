@@ -208,17 +208,19 @@ async function keep() {
     frag = await ML.encode(state);
   } catch { return; }
   if (seq !== keepSeq) return;
-  setAddress(frag);
+  // the draft first (the address bar can refuse: a browser limits replaceState calls)
   const work = ML.changes(state).length > 0 || ML.cleanTitle(mapTitle) !== openedTitle;
   if (work) drafts.put(draftKey, { frag, at: Date.now(), sig: DR.signature(markers, mapTitle), changes: ML.changes(state).length });
   else drafts.drop(draftKey);
   unshared = work;
+  setAddress(frag);
 }
 // the address bar on a fragment: ?staff kept, ?title dropped (the fragment holds the title); no reload, no history step
 function setAddress(frag) {
   const here = new URLSearchParams(location.search);
   here.delete("title");
-  history.replaceState(null, "", location.pathname + (here.toString() ? "?" + here : "") + "#" + frag);
+  try { history.replaceState(null, "", location.pathname + (here.toString() ? "?" + here : "") + "#" + frag); }
+  catch { /* too many calls in a short time: the next edit writes it */ }
 }
 
 // ------------------------------------------------------------------------------------------------ tiles
@@ -2677,19 +2679,30 @@ async function start() {
   drafts = DR.store(storage || memoryStorage());
   draftKey = DR.draftKey(state);
   const offer = DR.toOffer(drafts, draftKey, DR.signature(markers, mapTitle));
+  // a reviewer's flags (problems to fix): said at once, beside a draft's offer too
+  const flags = ML.flagged(markers);
+  const flagsText = flags.length ? t(flags.length === 1 ? "flagsBanner1" : "flagsBanner", flags.length) : "";
+  const seeFlags = () => el("button", { type: "button", "data-act": "flags-show", onclick: () => { $("banner").hidden = true; reviewTab = "summary"; setMode("review"); } }, t("flagsShow"));
+  // the draft back, with this link's flags on it (a reviewer flagged the link the draft's work started from)
+  const restoreDraft = async () => {
+    let frag = offer.frag;
+    if (flags.length) {
+      try {
+        const d = await ML.decode(frag), why = new Map(flags.map((m) => [m.id, m.fields[ML.FLAG]]));
+        for (const m of d.markers) if (why.has(m.id)) m.fields = { ...(m.fields || {}), [ML.FLAG]: why.get(m.id) };
+        frag = await ML.encode(d);
+      } catch { /* the draft as it was */ }
+    }
+    openLinkFrag(frag);
+  };
   if (offer) {
-    banner(t("draftFound", DR.whenText(offer.at, Date.now(), lang)), "draft", el("span", { class: "bbtns" },
-      el("button", { type: "button", class: "primary", "data-act": "draft-restore", onclick: () => openLinkFrag(offer.frag) }, t("draftRestore")),
-      el("button", { type: "button", "data-act": "draft-discard", onclick: () => { drafts.drop(draftKey); $("banner").hidden = true; toast(t("draftGone")); } }, t("draftDiscard"))));
-  }
+    banner(t("draftFound", DR.whenText(offer.at, Date.now(), lang)) + (flagsText ? " " + flagsText : ""), "draft", el("span", { class: "bbtns" },
+      el("button", { type: "button", class: "primary", "data-act": "draft-restore", onclick: restoreDraft }, t("draftRestore")),
+      el("button", { type: "button", "data-act": "draft-discard", onclick: () => { drafts.drop(draftKey); $("banner").hidden = true; toast(t("draftGone")); } }, t("draftDiscard")),
+      flagsText ? seeFlags() : null));
+  } else if (flagsText) banner(flagsText, "flags", seeFlags());
   buildPanes(view.floors, view);
   if (reachOn) setReach(true); else paintReachCtl();
-  // a reviewer's flags (problems to fix): said at once, unless a draft is being offered
-  const flags = ML.flagged(markers);
-  if (flags.length && !offer) {
-    banner(t(flags.length === 1 ? "flagsBanner1" : "flagsBanner", flags.length), "flags",
-      el("button", { type: "button", "data-act": "flags-show", onclick: () => { $("banner").hidden = true; reviewTab = "summary"; setMode("review"); } }, t("flagsShow")));
-  }
   // read-only hooks for the page's browser tests
   Object.defineProperty(window, "__panes", { get: () => panes });   // the panes now (side by side rebuilds them)
   window.__state = () => ({ markers: clone(markers), nextId, selected, tool, destFor, multi: [...multi], stamp: { ...stamp }, mode, undo: undoStack.length });
