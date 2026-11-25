@@ -46,6 +46,19 @@ and posts the new link (with its list of changes) back in their ticket.
   hides the rest; the floors card counts the changes per floor; the **Changes** tab lists them (a click goes there).
 - **Share:** the map's name (editable there), the message as Discord shows it, summary first: the name as the link,
   what it proposes and its objects, its changes counted (the list opens in the link's "View"); the meter; what to check.
+- **Nothing is lost:** after each edit the address bar holds the edited map (a reload keeps it), and this browser keeps
+  it as a draft of the link it was opened from (the newest 30 drafts). Opening that link again, from Discord or a
+  player's own saved link of it, offers the draft back: "Recover the draft from 18:20?" (**Recover** / **Discard**).
+  Closing or leaving the page with edits not yet copied or downloaded from Share asks first.
+- **Can't walk here** (the switch over the labels; on a phone in **More**; this browser remembers it): over each floor,
+  dark where a player can't stand (rocks, walls, props that block, void) and pink where the ground is closed: no walk,
+  rope, portal or ladder in from open ground, on today's map (its date in the key). Water stays as the map shows it. A
+  spawn, a rope's end or a portal's landing on pink or dark needs a way in, or another spot.
+- **Problems to fix:** staff can mark any marker with what to fix there (`?staff=1`: the panel's "Problem to fix"
+  field; the staff tools write the same). The page rings it in red with "!", writes the problem under its label (always
+  shown), says it in its panel (**Done** takes the mark off, the marker stays) and lists them all in Review's **Problems
+  to fix** (a click goes to each); opening such a link says how many there are. A mark is a note, never a change: the
+  change list and Share's counts leave it out.
 - **Markers:** monster spawn (the monster typed, or picked from the ones already on this map; how many, − / +; the
   radius as buttons, the circle and a sentence saying what it means; how many of that monster the map holds; an
   **observation**, shown under its name with ✎ on the marker), boss (picked from the game's bosses or any name typed, when
@@ -99,7 +112,8 @@ past them; one from before drops only the lock), in format 1 a field key an olde
 for byte what it was. A spawn's observation, an area's and a portal's colour (an index in `COLORS`) and a lever's
 action (`lever.js`: a short code with its cells relative to the lever, so moving or duplicating it carries the action)
 are extra fields the same way: a map that uses none of them keeps its exact bytes; each costs a few characters when
-used (a colour about 4, a lever's area about 8, an observation its deflated text).
+used (a colour about 4, a lever's area about 8, an observation its deflated text). A problem to fix (`flag`, text)
+is the last extra field of every kind the same way: a page from before it opens the map without the marks.
 
 Two made-up format-1 examples, which still open (a locked area "A", a spawn, a point and a note):
 `https://map.opengea.tech/?lang=en#1.Y2QIKGdhZGBhYWFiYGTgZU63YWJiACFGRkegAANvVCMjI0t4fk4aEwcLGyMTAwNHSi4jS0ZqUSoLMwMDv1s3IyNXcUFieZ5CZkpqIgMA`
@@ -122,9 +136,15 @@ The same two maps saved as format 2:
   `goto.js`: what a text in Go to means (a `/pos`, `x, z`, a floor, a search). No DOM; `tests/ui.test.mjs`.
 - `lever.js`: a lever's action code and its words; `review.js`: the summary, the checks, the diff and Share's
   message; `edits.js`: moving, duplicating and boxing several markers. No DOM; `tests/review.test.mjs`.
+- `draft.js`: the drafts this browser keeps (their key: the opened link's baseline; when one is offered). No DOM;
+  `tests/draft.test.mjs`.
 - `tiles/<client version>/<floor>/<zoom>/<x>_<y>.png`: the map, one set per game client version so an old link opens
   on its own map; `tiles/index.json` lists the sets, `tiles/<version>/meta.json` the floors and tiles. Floor `s` is the
-  surface; the others are slices by height. Only the coloured pictures are published.
+  surface; the others are slices by height. Only the coloured pictures are published, and the walk layer:
+- `reach/<version>/<floor>/<x>_<y>.png`: "Can't walk here", zoom 0 only (the page scales it), a 4-colour palette picture
+  per tile, one class per cell the coloured tiles draw (0 nothing, 1 can't stand, 2 closed, 3 water); tiles with nothing
+  in them left out; `reach/<version>/meta.json`: the floors, the tiles present, when the data was made, the colours.
+  Map geometry only, like the tiles: no heights, no ids, no counts, nothing of anyone.
 
 ## Running it locally
 

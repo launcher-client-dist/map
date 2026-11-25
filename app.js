@@ -10,6 +10,7 @@ import { BOSSES, bossOf } from "./bosses.js";
 import { parseLever, leverCode, leverText, wallCells, rebased, MAX_WALLS } from "./lever.js";
 import * as RV from "./review.js";
 import * as ED from "./edits.js";
+import * as DR from "./draft.js";
 
 const lang = pickLang();
 const t = translator(lang);
@@ -179,10 +180,48 @@ function commit(fn) {
   if (undoStack.length > 300) undoStack.shift();
   redoStack.length = 0;
   refresh();
+  keepSoon();
 }
 // (Review is look only: no undo or redo there either)
-function undo() { if (!undoStack.length || mode !== "edit") return; redoStack.push(snapshot()); restore(undoStack.pop()); refresh(); }
-function redo() { if (!redoStack.length || mode !== "edit") return; undoStack.push(snapshot()); restore(redoStack.pop()); refresh(); }
+function undo() { if (!undoStack.length || mode !== "edit") return; redoStack.push(snapshot()); restore(undoStack.pop()); refresh(); keepSoon(); }
+function redo() { if (!redoStack.length || mode !== "edit") return; undoStack.push(snapshot()); restore(redoStack.pop()); refresh(); keepSoon(); }
+
+// ---- the work is never only on screen: after each edit (KEEP_MS later) the address bar holds the state Share would
+// give (a reload keeps it) and this browser keeps it as the opened link's draft (draft.js: opening that link again
+// offers it back); leaving the page with edits not yet copied or downloaded from Share asks first
+const KEEP_MS = 400;
+let drafts = null, draftKey = "new", openedTitle = "";
+let unshared = false;   // edits since the last Copy or Download in Share
+let leaving = false;    // the page itself is opening another link (a draft, a file): no question
+let keepTimer = 0, keepSeq = 0;
+function keepSoon() {
+  clearTimeout(keepTimer);
+  keepTimer = setTimeout(keep, KEEP_MS);
+}
+async function keep() {
+  clearTimeout(keepTimer);
+  if (!tileMeta || !drafts) return;
+  const seq = ++keepSeq;
+  let frag, state;
+  try {
+    state = ML.saveState(opened, clone(markers), currentView(), tileVersion, nextId, mapTitle);
+    frag = await ML.encode(state);
+  } catch { return; }
+  if (seq !== keepSeq) return;
+  // the draft first (the address bar can refuse: a browser limits replaceState calls)
+  const work = ML.changes(state).length > 0 || ML.cleanTitle(mapTitle) !== openedTitle;
+  if (work) drafts.put(draftKey, { frag, at: Date.now(), sig: DR.signature(markers, mapTitle), changes: ML.changes(state).length });
+  else drafts.drop(draftKey);
+  unshared = work;
+  setAddress(frag);
+}
+// the address bar on a fragment: ?staff kept, ?title dropped (the fragment holds the title); no reload, no history step
+function setAddress(frag) {
+  const here = new URLSearchParams(location.search);
+  here.delete("title");
+  try { history.replaceState(null, "", location.pathname + (here.toString() ? "?" + here : "") + "#" + frag); }
+  catch { /* too many calls in a short time: the next edit writes it */ }
+}
 
 // ------------------------------------------------------------------------------------------------ tiles
 const TileLayer = L.TileLayer.extend({
@@ -197,6 +236,61 @@ function tileLayer(floor, opacity = 1) {
     floor, opacity, tileSize: 256, minZoom: -2, maxZoom: 5, minNativeZoom: -2, maxNativeZoom: 0, noWrap: true,
     bounds: L.latLngBounds(tileMeta.bounds), keepBuffer: 4,
   });
+}
+
+// ---- "Can't walk here" (reach/<version>/, the staff tools' map_reach.py): over each floor's picture, the cells a
+// player can't stand on (rocks, walls, props that block, void: dark) and the closed places (ground with no walk, rope,
+// portal or ladder in from open ground on today's map: pink). Zoom-0 tiles only (the page scales them); loaded the
+// first time the layer is turned on; this browser remembers the switch.
+let reachOn = pref.get("reach") === "1", reachMeta = null, reachVer = null, reachLoading = null;
+const ReachLayer = L.TileLayer.extend({
+  getTileUrl(c) {
+    const have = reachMeta && reachMeta.tiles[this.options.floor];
+    if (!have || !have.includes(c.x + "_" + c.y)) return BLANK;
+    return `reach/${reachVer}/${this.options.floor}/${c.x}_${c.y}.png`;
+  },
+});
+function loadReach() {
+  // this link's map version, else the newest (the walk data is today's world either way)
+  reachLoading ||= (async () => {
+    for (const v of new Set([tileVersion, tileIndex.latest])) {
+      try {
+        const r = await fetch(`reach/${v}/meta.json`);
+        if (r.ok) { reachMeta = await r.json(); reachVer = v; return; }
+      } catch { /* offline, or no layer for this version */ }
+    }
+    reachMeta = false;
+  })();
+  return reachLoading;
+}
+function paintReach(p) {
+  if (p.reach) { p.map.removeLayer(p.reach); p.reach = null; }
+  if (!reachOn || !reachMeta) return;
+  p.reach = new ReachLayer("", { floor: p.floor, tileSize: 256, minZoom: -2, maxZoom: 5, minNativeZoom: 0, maxNativeZoom: 0,
+    noWrap: true, bounds: L.latLngBounds(tileMeta.bounds), keepBuffer: 4, zIndex: 5, className: "reach" }).addTo(p.map);
+}
+async function setReach(on) {
+  reachOn = on;
+  pref.set("reach", on ? "1" : "0");
+  if (on) await loadReach();
+  for (const p of panes) paintReach(p);
+  paintReachCtl();
+}
+// the switch (the float over the maps; the phone's More menu) and, when on, its key and the data's date
+const reachToggle = () => el("button", { type: "button", class: "tgl", "data-reach": "1", "aria-pressed": "false", title: t("reachHelp"),
+  onclick: () => setReach(!reachOn) }, el("span", { class: "sw" }), t("reach"));
+const reachKey = () => el("span", { class: "reachKey", hidden: true },
+  el("span", {}, el("i", { class: "k blocked" }), t("reachBlocked")), el("span", {}, el("i", { class: "k closed" }), t("reachClosed")),
+  el("small", { class: "made" }));
+function paintReachCtl() {
+  for (const b of document.querySelectorAll("[data-reach]")) {
+    b.classList.toggle("on", reachOn);
+    b.setAttribute("aria-pressed", String(reachOn));
+  }
+  for (const k of document.querySelectorAll(".reachKey")) {
+    k.hidden = !reachOn || reachMeta === null;
+    k.querySelector(".made").textContent = reachMeta ? t("reachMade", reachMeta.made) : reachMeta === false ? t("reachNone") : "";
+  }
 }
 
 // ------------------------------------------------------------------------------------------------ panes
@@ -287,6 +381,7 @@ function setFloor(p, floor) {
   if (p.under) p.map.removeLayer(p.under);
   p.under = floor === "s" ? null : tileLayer("s", 0.14).addTo(p.map);   // the surface, dim, under a floor below it
   p.base = tileLayer(floor).addTo(p.map);
+  paintReach(p);
   p.layer.bringToFront?.();
   paintFloorNav(p);
 }
@@ -417,11 +512,33 @@ const isSel = (m) => m.id === selected || multi.has(m.id);
 // Revisar: what changed against the link this one was saved from ("new", "edited"; null: the same, or not reviewing)
 const rvStatus = (m) => (mode === "review" ? reviewDiff().status.get(m.id) || null : null);
 function icon(m, extra = "") {
-  const k = ui(m), size = BIG[m.kind] || 26, color = colorOf(m), rv = rvStatus(m);
-  const cls = "mk" + (BIG[m.kind] ? " " + m.kind : "") + (isSel(m) ? " sel" : "") + (m.locked ? " lock" : "") + (rv ? " rv-" + rv : "") + extra;
+  const k = ui(m), size = BIG[m.kind] || 26, color = colorOf(m), rv = rvStatus(m), flag = !!m.fields?.[ML.FLAG];
+  const cls = "mk" + (BIG[m.kind] ? " " + m.kind : "") + (isSel(m) ? " sel" : "") + (m.locked ? " lock" : "") + (rv ? " rv-" + rv : "") + (flag ? " flag" : "") + extra;
   // static glyphs only: no text from the link in this HTML
   return L.divIcon({ className: "", iconSize: [size, size], iconAnchor: [size / 2, size / 2],
-    html: `<div class="${cls}" style="background:${color};--ring:${color}">${m.locked ? "🔒" : k.svg || k.glyph}${m.fields?.combat ? '<span class="badge cb">⚔</span>' : ""}${countBadge(m)}${m.fields?.note ? '<span class="badge nt">✎</span>' : ""}</div>` });
+    html: `<div class="${cls}" style="background:${color};--ring:${color}">${m.locked ? "🔒" : k.svg || k.glyph}${m.fields?.combat ? '<span class="badge cb">⚔</span>' : ""}${countBadge(m)}${m.fields?.note ? '<span class="badge nt">✎</span>' : ""}${flag ? '<span class="badge fg">!</span>' : ""}</div>` });
+}
+
+// ---- a reviewer's flag (maplink.js FLAG: a problem to fix, in words): a red ring on the marker, its words under its
+// label (always shown), at the top of its panel, and in Review's Problems list
+const FLAG_RED = "#ff3b3b";
+const flagOf = (m) => m.fields?.[ML.FLAG] || "";
+// a label (text or a node) with the flag's words on a line under it (text only: someone typed them)
+function withFlag(m, content) {
+  const f = flagOf(m);
+  if (!f) return content;
+  const out = el("span", {}, content instanceof Node ? content : content || t("kind." + m.kind));
+  out.append(el("br"), el("small", { class: "flagtxt" }, "⚠ " + f));
+  return out;
+}
+function setFlag(id, val) {
+  commit(() => {
+    const n = byId(id);
+    if (!n || mode !== "edit" || !(canEdit(n) || STAFF)) return false;
+    const v = String(val ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, ML.MAX_TEXT);
+    if ((n.fields[ML.FLAG] ?? "") === v) return false;
+    if (v) n.fields[ML.FLAG] = v; else delete n.fields[ML.FLAG];
+  });
 }
 // a spawn of more than one monster: ×N on its corner (a number only: nothing typed goes into this HTML)
 function countBadge(m) {
@@ -617,33 +734,35 @@ function drawMarker(p, m) {
     });
     const label = labelOf(m), d = destOf(m), away = d && d.floor !== m.floor ? leadsText(d.floor) : "";
     const text = [label, away, m.fields?.combat ? "⚔ " + t("combatOn") : ""].filter(Boolean).join(" · ");
-    const permanent = labelShown(p, m);
-    if (m.kind === "boss" || m.kind === "npc") tip(mk, whoWhen(m), { permanent, ...(BIG[m.kind] ? { offset: [0, -18] } : {}) });
-    else if (m.kind === "spawn" && m.fields?.note) tip(mk, spawnLabel(m), { permanent });
-    else tip(mk, m.kind === "rope2" ? ("↔ " + text).trim() : text, { permanent });   // a two-way rope: ↔ always
+    const permanent = labelShown(p, m) || !!flagOf(m);   // a flagged one's words stay on the map
+    if (m.kind === "boss" || m.kind === "npc") tip(mk, withFlag(m, whoWhen(m)), { permanent, ...(BIG[m.kind] ? { offset: [0, -18] } : {}) });
+    else if (m.kind === "spawn" && m.fields?.note) tip(mk, withFlag(m, spawnLabel(m)), { permanent });
+    else tip(mk, withFlag(m, m.kind === "rope2" ? ("↔ " + text).trim() : text), { permanent });   // a two-way rope: ↔ always
     mk.addTo(p.layer);
     return;
   }
   if (m.cells) {
     const style = { color: k.color, weight: 0, fillOpacity: sel ? 0.45 : 0.3, interactive: tool === "select" || tool === "walls" || tool === "movegroup" };
     const poly = L.polygon(rings(m.cells), style).on("click", pick).addTo(p.layer);
-    const edge = sel ? "#ffe066" : rv ? RV_COLOR[rv] : k.color;
-    L.polyline(outline(m.cells), { color: edge, weight: sel || rv ? 3 : 2, dashArray: m.locked ? "4 4" : null, interactive: false }).addTo(p.layer);
+    const flagged = !!flagOf(m), edge = sel ? "#ffe066" : flagged ? FLAG_RED : rv ? RV_COLOR[rv] : k.color;
+    L.polyline(outline(m.cells), { color: edge, weight: sel || rv || flagged ? 3 : 2, dashArray: m.locked ? "4 4" : null, interactive: false }).addTo(p.layer);
     const c = ML.where(m);
-    if (c && labelOf(m) && labelShown(p, m)) {
+    if (c && (labelOf(m) || flagged) && (labelShown(p, m) || flagged)) {
       const anchor = L.marker(ll(c[0], c[1]), { icon: L.divIcon({ className: "", iconSize: [0, 0] }), interactive: false }).addTo(p.layer);
-      tip(anchor, (m.locked ? "🔒 " : "") + labelOf(m), { offset: [0, 0], direction: "center" });
+      tip(anchor, withFlag(m, (m.locked ? "🔒 " : "") + labelOf(m)), { offset: [0, 0], direction: "center" });
     } else if (labelOf(m)) tip(poly, (m.locked ? "🔒 " : "") + labelOf(m), { permanent: false, sticky: true, offset: [0, -10] });
     if (m.id === selected && !multi.size && canEdit(m)) moveHandle(p, m);
     return poly;
   }
   if (m.points) {
-    const line = L.polyline(m.points.map(([x, z]) => ll(x, z)), { color: sel ? "#ffe066" : rv ? RV_COLOR[rv] : k.color, weight: sel || rv ? 5 : 4,
+    const flagged = !!flagOf(m);
+    const line = L.polyline(m.points.map(([x, z]) => ll(x, z)), { color: sel ? "#ffe066" : flagged ? FLAG_RED : rv ? RV_COLOR[rv] : k.color, weight: sel || rv || flagged ? 5 : 4,
       dashArray: m.locked ? "6 6" : null, interactive: tool === "select" || tool === "movegroup" }).on("click", pick).addTo(p.layer);
     const [x1, z1] = m.points[m.points.length - 1];
     L.circleMarker(ll(m.points[0][0], m.points[0][1]), { radius: 5, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
     L.circleMarker(ll(x1, z1), { radius: 7, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
-    if (labelOf(m)) tip(line, (m.locked ? "🔒 " : "") + labelOf(m), { direction: "center", offset: [0, 0], permanent: labelShown(p, m), sticky: !labelShown(p, m) });
+    const shown = labelShown(p, m) || flagged;
+    if (labelOf(m) || flagged) tip(line, withFlag(m, (m.locked ? "🔒 " : "") + labelOf(m)), { direction: "center", offset: [0, 0], permanent: shown, sticky: !shown });
     if (m.id === selected && !multi.size && canEdit(m)) {
       m.points.forEach(([x, z], i) => {
         const h = L.marker(ll(x, z), { draggable: true, icon: L.divIcon({ className: "", html: '<div class="handle"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }) });
@@ -946,6 +1065,7 @@ function buildMenus() {
   }
   more.append(el("div", { class: "menu-sets" },
     el("div", { class: "set" }, el("span", {}, t("labels")), labelsSeg()),
+    el("div", { class: "set col" }, reachToggle(), reachKey()),
     el("div", { class: "set" }, el("span", {}, t("sideBySide")), panesSeg()),
     el("div", { class: "set" }, el("span", {}, t("modeWord")), modeSeg()),
     el("div", { class: "set" },
@@ -1196,6 +1316,11 @@ function renderPanel() {
   }
   const body = el("div", { class: "body" });
   panel.append(body);
+  // a reviewer's flag: what to fix here; whoever can change the marker marks it done (the flag goes, not the marker)
+  if (flagOf(m)) {
+    body.append(el("div", { class: "flagbox", role: "note" }, el("b", {}, "⚠ " + t("flagWord")), el("span", {}, flagOf(m)),
+      mode === "edit" && (editable || STAFF) ? el("button", { type: "button", "data-act": "flag-done", title: t("flagDoneHelp"), onclick: () => setFlag(m.id, "") }, "✓ " + t("flagDone")) : null));
+  }
   if (mode === "review") reviewNote(body, m);
   if (!(m.kind in KIND_UI)) body.append(el("div", { class: "note" }, t("unknownKind")));
   else if (m.locked) body.append(el("div", { class: "note" }, "🔒 " + t("locked")));
@@ -1237,6 +1362,11 @@ function renderPanel() {
     box.checked = !!m.locked;
     box.addEventListener("change", () => commit(() => { byId(m.id).locked = box.checked; }));
     body.append(el("label", { class: "check" }, box, t("lock")));
+    // staff mark a problem for the map's owner (the same field the staff tools' "maplink.py flag" writes)
+    const fl = el("input", { type: "text", maxlength: ML.MAX_TEXT, disabled: mode !== "edit", autocomplete: "off", placeholder: t("flagPlaceholder"), "data-act": "flag-text" });
+    fl.value = flagOf(m);
+    fl.addEventListener("change", () => setFlag(m.id, fl.value));
+    body.append(el("label", {}, t("flagStaff")), fl);
   }
   panel.append(el("div", { class: "ft" },
     mode === "edit" && m.kind in KIND_UI ? el("button", { type: "button", "data-act": "duplicate", title: t("dupHelp"), onclick: duplicateSel }, "⧉ " + t("dup")) : null,
@@ -1810,13 +1940,12 @@ async function save() {
   // the dialog's buttons act on what it shows now: a name typed and then a click on Copy (the name's change fires
   // between the press and the click, and starts a new render) waits for that render and copies its message
   let cur = null, pending = null;
-  const act = (k, fn) => async () => { await pending; fn(cur[k]); };
+  // (a copy or a download: the work has left the page, leaving it no longer asks)
+  const act = (k, fn) => async () => { await pending; fn(cur[k]); unshared = false; };
   const render = async () => {
     const { frag, url, saved, message } = await shareParts();
     // the address bar: the saved link, ?staff kept, ?title dropped (the fragment holds the title now)
-    const here = new URLSearchParams(location.search);
-    here.delete("title");
-    history.replaceState(null, "", location.pathname + (here.toString() ? "?" + here : "") + "#" + frag);
+    setAddress(frag);
     const lines = changeLines(saved);
     // the file (past the limit): the message, then the whole change list (the link inside it, unchanged)
     const file = message + (lines.length ? "\n\n" + t("fileList") + "\n" + lines.join("\n") : "");
@@ -1883,6 +2012,7 @@ function linkIn(text) {
 }
 
 function openLinkFrag(frag) {
+  leaving = true;   // (the work is in this browser's draft: opening a link asks nothing)
   if ("#" + frag === location.hash) { location.reload(); return; }
   location.hash = frag;   // hashchange: the page reloads on it
 }
@@ -1956,6 +2086,7 @@ function buildFrame() {
     el("div", { id: "subtools", hidden: true }),
     el("div", { id: "diffBar", class: "float", hidden: true, role: "status" }),
     el("div", { id: "floorCard", role: "region", "aria-label": t("floorsWord") }),
+    el("div", { id: "reachCtl", class: "float" }, reachToggle(), reachKey()),
     el("div", { id: "labelsCtl", class: "float" }, el("span", {}, t("labels") + ":"), labelsSeg()));
   const status = el("footer", { id: "coords" },
     el("button", { type: "button", id: "cur", disabled: true, title: t("statusCopy"), onclick: () => lastCell && copy(posLine(lastCell.x, lastCell.z, lastCell.floor)) }, "x · z"),
@@ -2087,6 +2218,17 @@ function summaryPanel(panel) {
   if (objects.length) {
     body.append(el("div", { class: "fl" }, el("span", {}, t("rv.objects"))));
     body.append(el("div", { class: "chips" }, objects.map(([k, c]) => el("span", { class: "chip" }, dotNode(k, "mk mini"), KIND_UI[k] ? t("kind." + k) : k, el("i", {}, String(c))))));
+  }
+  // a reviewer's flags: each problem, a click goes to its marker
+  const flags = ML.flagged(markers);
+  if (flags.length) {
+    body.append(el("div", { class: "fl" }, el("span", {}, t("rv.problems", flags.length))));
+    body.append(el("div", { class: "problems" }, flags.map((m) => {
+      const w = ML.where(m);
+      return el("button", { type: "button", class: "prob", "data-flag": m.id, onclick: () => w && goTo(w[0], w[1], m.floor, m.id) },
+        dotNode(m.kind in KIND_UI ? m.kind : "?", "mk mini"), el("span", { class: "pw" }, el("b", {}, flagOf(m)),
+          el("small", {}, [KIND_UI[m.kind] ? t("kind." + m.kind) : m.kind, labelOf(m), "#" + m.id, floorShort(m.floor)].filter(Boolean).join(" · "))));
+    })));
   }
   // before sending: what to look at, each with "show" (the next one on each click)
   body.append(el("div", { class: "fl" }, el("span", {}, t("rv.checks"))));
@@ -2477,8 +2619,24 @@ function buildBar() {
     else if (e.key === "Escape" && ["walls", "pulldest", "movegroup"].includes(tool)) endPick();
     else if (e.key === "Escape") { draftRoute = null; selected = null; multi.clear(); ghostShown = null; if (tool !== "select") setTool("select"); else refresh(); }
   });
-  window.addEventListener("hashchange", () => location.reload());
+  window.addEventListener("hashchange", () => { leaving = true; location.reload(); });
+  // closing or reloading with edits not copied or downloaded from Share: the browser asks (its own words); the draft
+  // is kept either way, and written at once when the page is hidden (a closed tab may never run a pending timer)
+  window.addEventListener("beforeunload", (e) => { if (unshared && !leaving) { e.preventDefault(); e.returnValue = ""; } });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && keepTimer) keep(); });
   hookPanel();
+}
+
+// a Storage for a visit whose browser blocks localStorage (the same calls, in memory)
+function memoryStorage() {
+  const m = new Map();
+  return {
+    get length() { return m.size; },
+    key: (i) => [...m.keys()][i] ?? null,
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => { m.set(k, String(v)); },
+    removeItem: (k) => { m.delete(k); },
+  };
 }
 
 async function start() {
@@ -2513,8 +2671,38 @@ async function start() {
   }
   // the title: the link's own, else ?title= (someone's text either way: cleaned, shown as text only)
   mapTitle = state?.title || ML.cleanTitle(new URLSearchParams(location.search).get("title"));
+  openedTitle = ML.cleanTitle(mapTitle);
   showTitle();
+  // this link's draft in this browser (draft.js): offered back when it holds work this link doesn't
+  let storage = null;
+  try { storage = window.localStorage; } catch { /* blocked site data: drafts for this visit only */ }
+  drafts = DR.store(storage || memoryStorage());
+  draftKey = DR.draftKey(state);
+  const offer = DR.toOffer(drafts, draftKey, DR.signature(markers, mapTitle));
+  // a reviewer's flags (problems to fix): said at once, beside a draft's offer too
+  const flags = ML.flagged(markers);
+  const flagsText = flags.length ? t(flags.length === 1 ? "flagsBanner1" : "flagsBanner", flags.length) : "";
+  const seeFlags = () => el("button", { type: "button", "data-act": "flags-show", onclick: () => { $("banner").hidden = true; reviewTab = "summary"; setMode("review"); } }, t("flagsShow"));
+  // the draft back, with this link's flags on it (a reviewer flagged the link the draft's work started from)
+  const restoreDraft = async () => {
+    let frag = offer.frag;
+    if (flags.length) {
+      try {
+        const d = await ML.decode(frag), why = new Map(flags.map((m) => [m.id, m.fields[ML.FLAG]]));
+        for (const m of d.markers) if (why.has(m.id)) m.fields = { ...(m.fields || {}), [ML.FLAG]: why.get(m.id) };
+        frag = await ML.encode(d);
+      } catch { /* the draft as it was */ }
+    }
+    openLinkFrag(frag);
+  };
+  if (offer) {
+    banner(t("draftFound", DR.whenText(offer.at, Date.now(), lang)) + (flagsText ? " " + flagsText : ""), "draft", el("span", { class: "bbtns" },
+      el("button", { type: "button", class: "primary", "data-act": "draft-restore", onclick: restoreDraft }, t("draftRestore")),
+      el("button", { type: "button", "data-act": "draft-discard", onclick: () => { drafts.drop(draftKey); $("banner").hidden = true; toast(t("draftGone")); } }, t("draftDiscard")),
+      flagsText ? seeFlags() : null));
+  } else if (flagsText) banner(flagsText, "flags", seeFlags());
   buildPanes(view.floors, view);
+  if (reachOn) setReach(true); else paintReachCtl();
   // read-only hooks for the page's browser tests
   Object.defineProperty(window, "__panes", { get: () => panes });   // the panes now (side by side rebuilds them)
   window.__state = () => ({ markers: clone(markers), nextId, selected, tool, destFor, multi: [...multi], stamp: { ...stamp }, mode, undo: undoStack.length });

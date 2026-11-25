@@ -88,24 +88,29 @@ export function cleanTitle(text) {
 //   note (spawn): an observation shown under the monster's name
 //   color (area, portal): an index in COLORS (absent: the kind's own colour)
 //   pull (lever): what pulling it does, lever.js's compact code (absent: not said)
+//   flag (every kind, the last of its extra): a problem a reviewer marked on this marker, in words (absent: none); the
+//     page rings it in red and lists it under Review's Problems. A note to the map's owner, not a change: changes()
+//     leaves it out (FLAG).
 const COMBAT = ["combat", "int"];
+export const FLAG = "flag";
+const FLAG_F = [FLAG, "str"];
 export const KINDS = [
-  { name: "spawn", geometry: "point", fields: [["monster", "str"], ["count", "int"], ["radius", "int"]], extra: [["note", "str"]] },
-  { name: "poi", geometry: "point", fields: [["label", "str"]] },
-  { name: "area", geometry: "cells", fields: [["label", "str"]], extra: [["color", "int"]] },
-  { name: "route", geometry: "line", fields: [["label", "str"]] },
-  { name: "note", geometry: "point", fields: [["text", "str"]] },
+  { name: "spawn", geometry: "point", fields: [["monster", "str"], ["count", "int"], ["radius", "int"]], extra: [["note", "str"], FLAG_F] },
+  { name: "poi", geometry: "point", fields: [["label", "str"]], extra: [FLAG_F] },
+  { name: "area", geometry: "cells", fields: [["label", "str"]], extra: [["color", "int"], FLAG_F] },
+  { name: "route", geometry: "line", fields: [["label", "str"]], extra: [FLAG_F] },
+  { name: "note", geometry: "point", fields: [["text", "str"]], extra: [FLAG_F] },
   // map things: ropes, holes and portals lead somewhere (an optional destination, on any floor)
-  { name: "rope", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT] },
-  { name: "lever", geometry: "point", fields: [["label", "str"]], extra: [COMBAT, ["pull", "str"]] },
-  { name: "hole", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT] },
-  { name: "door", geometry: "point", fields: [["label", "str"]] },
-  { name: "portal", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT, ["color", "int"]] },
-  { name: "elevator", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT] },
+  { name: "rope", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT, FLAG_F] },
+  { name: "lever", geometry: "point", fields: [["label", "str"]], extra: [COMBAT, ["pull", "str"], FLAG_F] },
+  { name: "hole", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT, FLAG_F] },
+  { name: "door", geometry: "point", fields: [["label", "str"]], extra: [FLAG_F] },
+  { name: "portal", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT, ["color", "int"], FLAG_F] },
+  { name: "elevator", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT, FLAG_F] },
   // from CORE_KINDS on: each one a length and a format-1 body (a page from before keeps it as raw bytes)
-  { name: "rope2", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT] },   // a two-way rope: goes and comes back
-  { name: "boss", geometry: "point", fields: [["monster", "str"], ["schedule", "str"], ["label", "str"]] },
-  { name: "npc", geometry: "point", fields: [["name", "str"], ["schedule", "str"], ["label", "str"]] },
+  { name: "rope2", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT, FLAG_F] },   // a two-way rope: goes and comes back
+  { name: "boss", geometry: "point", fields: [["monster", "str"], ["schedule", "str"], ["label", "str"]], extra: [FLAG_F] },
+  { name: "npc", geometry: "point", fields: [["name", "str"], ["schedule", "str"], ["label", "str"]], extra: [FLAG_F] },
 ];
 export const KIND_CODE = Object.fromEntries(KINDS.map((k, i) => [k.name, i]));
 // The colours an area or a portal can wear, by the index the color field holds (append only; 0 is never written: no
@@ -872,9 +877,23 @@ export function markerBytes(m) {
   return w.out();
 }
 
+// The same marker, leaving out a reviewer's flag (a note to the owner, never a change: Review, was and the change list
+// all compare through here)
 export function same(a, b) {
-  const x = markerBytes(a), y = markerBytes(b);
+  const x = markerBytes(unflagged(a)), y = markerBytes(unflagged(b));
   return x.length === y.length && x.every((v, i) => v === y[i]);
+}
+
+export function unflagged(m) {
+  if (!m.fields || m.fields[FLAG] == null) return m;
+  const fields = { ...m.fields };
+  delete fields[FLAG];
+  return { ...m, fields };
+}
+
+// [marker] that carry a reviewer's flag, in id order
+export function flagged(markers) {
+  return (markers || []).filter((m) => m.fields && m.fields[FLAG]).sort((a, b) => a.id - b.id);
 }
 
 export function where(m) {
@@ -927,7 +946,7 @@ export function changes(state) {
     if (destKey(a) !== destKey(b)) out.push({ op: "dest", id, kind: b.kind, from: a.dest || null, to: b.dest || null });
     const fa = a.fields || {}, fb = b.fields || {};
     for (const name of [...new Set([...Object.keys(fa), ...Object.keys(fb)])].sort()) {
-      if (fa[name] !== fb[name]) out.push({ op: "edited", id, kind: b.kind, field: name, old: fa[name] ?? null, new: fb[name] ?? null });
+      if (name !== FLAG && fa[name] !== fb[name]) out.push({ op: "edited", id, kind: b.kind, field: name, old: fa[name] ?? null, new: fb[name] ?? null });
     }
     if (!!a.locked !== !!b.locked) out.push({ op: b.locked ? "locked" : "unlocked", id, kind: b.kind });
   }
