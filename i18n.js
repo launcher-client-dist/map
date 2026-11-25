@@ -5,6 +5,7 @@ const W = {
   en: {
     title: "Opengea Map", titleWith: "{0} - Opengea Map", mapTitle: "Map title",
     surface: "Surface", floor: "Floor {0}", floorY: "Floor {0} (y {1})", floorCount: "{0} · {1}",
+    floorShift: "Shift: every floor", floorLinksTo: "ropes and portals to: {0}", surfaceShort: "Surf.",
     panes: "Floors side by side", lang: "Language",
     "tool.select": "Select", "tool.spawn": "Monster spawn", "tool.poi": "Point", "tool.area": "Area", "tool.route": "Route",
     "tool.note": "Note",
@@ -102,6 +103,7 @@ const W = {
   pt: {
     title: "Mapa do Opengea", titleWith: "{0} - Mapa do Opengea", mapTitle: "Título do mapa",
     surface: "Superfície", floor: "Andar {0}", floorY: "Andar {0} (y {1})", floorCount: "{0} · {1}",
+    floorShift: "Shift: todos os andares", floorLinksTo: "cordas e portais pra: {0}", surfaceShort: "Sup.",
     panes: "Andares lado a lado", lang: "Idioma",
     "tool.select": "Selecionar", "tool.spawn": "Spawn de monstro", "tool.poi": "Ponto", "tool.area": "Área",
     "tool.route": "Rota", "tool.note": "Nota",
@@ -201,6 +203,7 @@ const W = {
   es: {
     title: "Mapa de Opengea", titleWith: "{0} - Mapa de Opengea", mapTitle: "Título del mapa",
     surface: "Superficie", floor: "Piso {0}", floorY: "Piso {0} (y {1})", floorCount: "{0} · {1}",
+    floorShift: "Shift: todos los pisos", floorLinksTo: "cuerdas y portales a: {0}", surfaceShort: "Sup.",
     panes: "Pisos lado a lado", lang: "Idioma",
     "tool.select": "Seleccionar", "tool.spawn": "Spawn de monstruo", "tool.poi": "Punto", "tool.area": "Área",
     "tool.route": "Ruta", "tool.note": "Nota",
@@ -300,6 +303,7 @@ const W = {
   zh: {
     title: "Opengea 地图", titleWith: "{0} - Opengea 地图", mapTitle: "地图标题",
     surface: "地面", floor: "第 {0} 层", floorY: "第 {0} 层 (y {1})", floorCount: "{0} · {1}",
+    floorShift: "Shift：所有楼层", floorLinksTo: "绳索和传送门通往：{0}", surfaceShort: "地面",
     panes: "并排显示楼层", lang: "语言",
     "tool.select": "选择", "tool.spawn": "怪物刷新点", "tool.poi": "地点", "tool.area": "区域", "tool.route": "路线",
     "tool.note": "备注",

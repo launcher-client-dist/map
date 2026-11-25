@@ -25,6 +25,27 @@ export function nextFloor(floors, tiles, current, dir, view) {
 // buildings' upper floors, 0 and below the ground and the caves under it)
 export const level = (f) => (f === "s" ? 0.5 : +f);
 
+// ▲ / ▼ by height (the surface between floor 0 and floor 1): dir -1 up, +1 down. The next floor that matters (it holds
+// markers, or a rope's or portal's end: `matters`); none that way: the next one with a map tile in the view (`every`:
+// that one, matters or not). null: nothing that way.
+export function stepFloor(floors, tiles, current, dir, view, matters = [], every = false) {
+  const here = tilesInView(view), lv = level(current);
+  const way = floors.filter((f) => (dir < 0 ? level(f) > lv : level(f) < lv))
+    .sort((a, b) => (dir < 0 ? level(a) - level(b) : level(b) - level(a)));
+  const mapped = (f) => { const have = new Set(tiles[f]?.["0"] || []); return here.some((k) => have.has(k)); };
+  if (!every) { const m = way.find((f) => matters.includes(f)); if (m) return m; }
+  return way.find(mapped) ?? null;
+}
+
+// the floors joined by ropes, holes, portals and elevators that lead from one floor to another: {floor: [floors]}
+export function floorLinks(markers) {
+  const out = {};
+  const add = (a, b) => { (out[a] ||= []).includes(b) || out[a].push(b); };
+  for (const m of markers) if (m.dest && m.dest.floor !== m.floor) { add(m.floor, m.dest.floor); add(m.dest.floor, m.floor); }
+  for (const k of Object.keys(out)) out[k].sort((a, b) => level(b) - level(a));
+  return out;
+}
+
 // the markers on each floor: {floor: n}; a floor with none is absent
 export function floorCounts(markers) {
   const out = {};

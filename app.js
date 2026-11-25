@@ -51,6 +51,7 @@ const MORE_TOOLS = ["boss", "poi", "area", "route", "legend"];
 // (on hover only)
 const LABEL_ZOOM = 4;
 const LINK_WARN = 1800, LINK_MAX = 2000;   // Discord's message limit: the link's size, live, warns from LINK_WARN
+const PHONE = matchMedia("(max-width: 720px)");   // style.css's phone layout
 // a field's word in the panel and the change list: its own (a boss's or an NPC's label) or the field's
 const fieldWord = (kind, name) => t(KIND_UI[kind]?.fields?.[name]?.word || "field." + name);
 // a two-way rope: an arrow both ways
@@ -190,8 +191,8 @@ function buildPanes(floors, view) {
     panes.push(p);
     setFloor(p, floor);
     select.addEventListener("change", () => { setFloor(p, select.value); refresh(); });
-    up.addEventListener("click", () => stepFloor(p, -1));
-    down.addEventListener("click", () => stepFloor(p, 1));
+    up.addEventListener("click", (e) => stepFloor(p, -1, e.shiftKey));
+    down.addEventListener("click", (e) => stepFloor(p, 1, e.shiftKey));
     mapEl.addEventListener("pointerenter", () => { activePane = p; });
     paneEl.addEventListener("pointerdown", () => { activePane = p; if (focusPane !== p) { focusPane = p; paintFloorCard(); } });
     map.on("moveend", () => { paintFloorNav(p); measureLinkSoon(); });
@@ -254,13 +255,22 @@ function setFloor(p, floor) {
   paintFloorNav(p);
 }
 
-// ---- floor up / down. tileMeta.floors runs from the top (the surface, then 10 .. -16); a step skips floors with no
-// map tile in the pane's view (blank there), and the view stays where it is.
+// ---- floor up / down, by height (the surface between floor 0 and floor 1): the next floor that matters (markers, or
+// the end of a rope, hole, portal or elevator of this map), else the next with map in the pane's view; Shift: every
+// floor with map in view (Setzer, 11-25: the game's floors don't follow a neat order, the arrows follow the ones that
+// matter). The view stays where it is unless the floor has nothing in view: then its markers come into view.
 let activePane = null;   // the pane the shortcuts move: the last one pointed at
 
-// dir -1: the floor above, +1: the floor below; null when there is none with map here (the rule: floors.js)
-function nextFloor(p, dir) {
-  return FL.nextFloor(tileMeta.floors, tileMeta.tiles, p.floor, dir, viewCorners(p));
+// the floors that matter on this map
+function floorsThatMatter() {
+  const out = new Set(markers.map((m) => m.floor));
+  for (const m of markers) if (m.dest) out.add(m.dest.floor);
+  return [...out];
+}
+
+// dir -1: the floor above, +1: the floor below; null when there is none (the rule: floors.js stepFloor)
+function nextFloor(p, dir, every = false) {
+  return FL.stepFloor(tileMeta.floors, tileMeta.tiles, p.floor, dir, viewCorners(p), floorsThatMatter(), every);
 }
 // a pane's view corners in zoom-0 pixels
 function viewCorners(p) {
@@ -269,19 +279,24 @@ function viewCorners(p) {
   return [a.x, a.y, c.x, c.y];
 }
 
-function stepFloor(p, dir) {
-  const f = p && nextFloor(p, dir);
+function stepFloor(p, dir, every = false) {
+  const f = p && nextFloor(p, dir, every);
   if (!f) return;
-  setFloor(p, f);
-  refresh();
-  showCoordsFloor(p);
+  focusPane = p;
+  const have = new Set(tileMeta.tiles[f]?.["0"] || []);
+  showFloor(f, FL.tilesInView(viewCorners(p)).some((k) => have.has(k)));   // map here: the view stays
 }
 
+// the arrows: off at the end, and their tooltip names where they go (and how many markers it holds)
 function paintFloorNav(p) {
   if (!p.up || !tileMeta) return;
   try { p.map.getCenter(); } catch { return; }   // no view yet (a pane being built): its first moveend paints it
-  p.up.disabled = !nextFloor(p, -1);
-  p.down.disabled = !nextFloor(p, 1);
+  const counts = FL.floorCounts(markers);
+  for (const [b, dir, word, keys] of [[p.up, -1, "floorUp", "PageUp, ]"], [p.down, 1, "floorDown", "PageDown, ["]]) {
+    const f = nextFloor(p, dir);
+    b.disabled = !f;
+    b.title = f ? `${t(word)}: ${floorOptionText(f, counts)} (${keys}; ${t("floorShift")})` : t(word);
+  }
 }
 
 // the bottom bar names the floor the pane now shows (the cursor may not have moved)
@@ -619,6 +634,7 @@ function refresh() {
   drawLinksSoon();
   paintFloorSelects();
   paintFloorCard();
+  for (const p of panes) paintFloorNav(p);
   paintCount();
   for (const id of ["undo", "undoM"]) if ($(id)) $(id).disabled = !undoStack.length || mode !== "edit";
   for (const id of ["redo", "redoM"]) if ($(id)) $(id).disabled = !redoStack.length || mode !== "edit";
@@ -681,9 +697,10 @@ function setTool(name) {
   if (tool === "route" && name !== "route") finishRoute();
   destFor = null;
   tool = name;
-  // a drawing tool closes the panel of anything it doesn't work on (on a phone the panel covers half the map)
+  // on a phone a drawing tool closes the panel of anything it doesn't work on (the drawer covers half the map); on a
+  // computer the docked panel stays (closing and reopening it on every placement would shift the map each time)
   const sel = byId(selected);
-  if (name !== "select" && !(sel && sel.kind === name && (name === "area" || name === "route"))) selected = null;
+  if (name !== "select" && PHONE.matches && !(sel && sel.kind === name && (name === "area" || name === "route"))) selected = null;
   applyTool();
   if (name === "area") toast(t("hintArea"));
   else if (name === "route") toast(t("hintRoute"));
@@ -1386,10 +1403,10 @@ function buildFrame() {
   // a map file dropped anywhere on the page opens it
   addEventListener("dragover", (e) => { if ([...(e.dataTransfer?.types || [])].includes("Files")) e.preventDefault(); });
   addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) { e.preventDefault(); readFile(e.dataTransfer.files[0]); } });
-  // the panel docks beside the maps: when it opens or closes (or the window changes) the maps measure again, keep
-  // their centre, and the selected marker stays in view
+  // the panel docks beside the maps: when it opens or closes (or the window changes) the maps measure again with their
+  // left edge still (what was under the cursor stays there), and the selected marker stays in view
   new ResizeObserver(() => {
-    for (const p of panes) p.map.invalidateSize({ animate: false, pan: true });
+    for (const p of panes) p.map.invalidateSize({ animate: false, pan: false });
     const m = byId(selected), w = m && ML.where(m);
     const p = w && panes.find((q) => q.floor === m.floor);
     if (p && !p.map.getBounds().pad(-0.08).contains(ll(w[0], w[1]))) p.map.panInside(ll(w[0], w[1]), { padding: [40, 40], animate: false });
@@ -1479,14 +1496,23 @@ function paintFloorCard() {
   const withMarkers = tileMeta.floors.filter((f) => counts[f] || shownIn(f).length);
   const empty = tileMeta.floors.filter((f) => !withMarkers.includes(f));
   const list = el("div", { class: "rows" });
+  const links = FL.floorLinks(markers);
   for (const f of floorsOpen ? tileMeta.floors : withMarkers) {
-    const ins = shownIn(f);
-    list.append(el("button", { type: "button", "data-floor": f,
+    const ins = shownIn(f), to = links[f] || [];
+    const row = el("button", { type: "button", "data-floor": f,
       class: "f" + (target.floor === f ? " on" : ins.length ? " shown" : "") + (counts[f] ? "" : " empty"),
-      "aria-pressed": String(target.floor === f), title: floorLabel(f), onclick: () => showFloor(f) },
+      "aria-pressed": String(target.floor === f), title: floorLabel(f) + (to.length ? " · " + t("floorLinksTo", to.map(floorShort).join(", ")) : ""),
+      onclick: () => { hidePreview(); showFloor(f); } },
     el("b", {}, floorShort(f)),
     panes.length > 1 && ins.length ? el("span", { class: "pn" }, ins.join("·")) : null,
-    counts[f] ? el("span", { class: "c" }, String(counts[f])) : null));
+    counts[f] ? el("span", { class: "c" }, String(counts[f])) : null,
+    // where this floor's ropes, holes and portals lead (and what leads here)
+    to.length ? el("small", { class: "to" }, "⇅ " + to.map((x) => (x === "s" ? t("surfaceShort") : x)).join(" · ")) : null);
+    row.addEventListener("pointerenter", (e) => { if (e.pointerType === "mouse") showPreview(f, row); });
+    row.addEventListener("pointerleave", hidePreview);
+    row.addEventListener("focus", () => showPreview(f, row));
+    row.addEventListener("blur", hidePreview);
+    list.append(row);
   }
   card.append(list);
   if (empty.length) card.append(el("button", { type: "button", class: "more", onclick: () => { floorsOpen = !floorsOpen; paintFloorCard(); } },
@@ -1495,13 +1521,48 @@ function paintFloorCard() {
   paintPaneCount();
 }
 
-// a floor from the card or Go to: the pane last clicked shows it; its markers come into view
-function showFloor(f) {
+// a floor's preview beside the card (hover or focus on its row): its map around the centre of the pane the card acts
+// on, two pixels a cell, and its markers as dots (the floor layers beside the minimap Setzer asked for, 11-25)
+const PREV_W = 120, PREV_H = 84, PREV_S = 2;
+function showPreview(f, row) {
+  if (PHONE.matches) return;
+  let box = $("floorPreview");
+  if (!box) { box = el("div", { id: "floorPreview", "aria-hidden": "true" }); document.body.append(box); }
+  const c = targetPane().map.getCenter(), cx = Math.round(c.lng), cz = Math.round(c.lat);
+  const x0 = cx - PREV_W / 2, y0 = -cz - PREV_H / 2;   // zoom-0 pixels: column x, row -z
+  const map = el("div", { class: "pv-map" });
+  const have = new Set(tileMeta.tiles[f]?.["0"] || []);
+  for (let tx = Math.floor(x0 / 256); tx <= Math.floor((x0 + PREV_W) / 256); tx++) {
+    for (let ty = Math.floor(y0 / 256); ty <= Math.floor((y0 + PREV_H) / 256); ty++) {
+      if (!have.has(tx + "_" + ty)) continue;
+      const img = el("img", { src: `tiles/${tileVersion}/${f}/0/${tx}_${ty}.png`, alt: "" });
+      Object.assign(img.style, { left: (tx * 256 - x0) * PREV_S + "px", top: (ty * 256 - y0) * PREV_S + "px", width: 256 * PREV_S + "px" });
+      map.append(img);
+    }
+  }
+  for (const m of markers) {
+    const w = m.floor === f && ML.where(m);
+    if (!w || w[0] < x0 || w[0] > x0 + PREV_W || -w[1] < y0 || -w[1] > y0 + PREV_H) continue;
+    const dot = el("i", {});
+    Object.assign(dot.style, { left: (w[0] - x0) * PREV_S + "px", top: (-w[1] - y0) * PREV_S + "px", background: ui(m).color });
+    map.append(dot);
+  }
+  const counts = FL.floorCounts(markers);
+  box.replaceChildren(map, el("div", { class: "cap" }, floorOptionText(f, counts)));
+  const r = row.getBoundingClientRect(), card = $("floorCard").getBoundingClientRect();
+  Object.assign(box.style, { right: innerWidth - card.left + 8 + "px", top: Math.max(8, Math.min(r.top - 20, innerHeight - PREV_H * PREV_S - 40)) + "px" });
+  box.hidden = false;
+}
+function hidePreview() { if ($("floorPreview")) $("floorPreview").hidden = true; }
+
+// a floor from the card, Go to or the arrows: the pane last clicked shows it; its markers come into view when none
+// is in view (keep: the view stays)
+function showFloor(f, keep = false) {
   const p = targetPane();
   if (p.floor !== f) setFloor(p, f);
   const mine = markers.filter((m) => m.floor === f).map(ML.where).filter(Boolean);
   const view = p.map.getBounds();
-  if (mine.length && !mine.some(([x, z]) => view.contains(ll(x, z)))) {
+  if (!keep && mine.length && !mine.some(([x, z]) => view.contains(ll(x, z)))) {
     p.map.fitBounds(L.latLngBounds(mine.map(([x, z]) => ll(x, z))).pad(0.15), { maxZoom: 3, animate: false });
   }
   refresh();
@@ -1697,8 +1758,8 @@ function buildBar() {
     else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
     else if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
     else if (e.key === "Enter" && tool === "route") finishRoute();
-    else if (!mod && (e.key === "PageUp" || e.key === "]")) { e.preventDefault(); stepFloor(activePane || panes[0], -1); }
-    else if (!mod && (e.key === "PageDown" || e.key === "[")) { e.preventDefault(); stepFloor(activePane || panes[0], 1); }
+    else if (!mod && (e.key === "PageUp" || e.key === "]" || e.key === "}")) { e.preventDefault(); stepFloor(activePane || panes[0], -1, e.shiftKey); }
+    else if (!mod && (e.key === "PageDown" || e.key === "[" || e.key === "{")) { e.preventDefault(); stepFloor(activePane || panes[0], 1, e.shiftKey); }
     else if (e.key === "Escape" && closeMenus()) return;
     else if (e.key === "Escape" && tool === "dest") endDestPick();
     else if (e.key === "Escape") { draftRoute = null; selected = null; if (tool !== "select") setTool("select"); else refresh(); }

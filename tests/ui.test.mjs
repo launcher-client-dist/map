@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { floorCounts, paneFloor, openingFloors, level } from "../floors.js";
+import { floorCounts, paneFloor, openingFloors, level, stepFloor, floorLinks } from "../floors.js";
 import { parsePlace, placeFloors, parseFloor, searchMarkers, nearMarkers, fold } from "../goto.js";
 
 const FLOORS = JSON.parse(readFileSync(new URL("../tiles/0.2.1/meta.json", import.meta.url))).floors;
@@ -35,6 +35,28 @@ test("a new side-by-side pane: never the top of the world", () => {
   // every floor with markers shown: the next one down with map
   assert.equal(paneFloor(FLOORS, { s: 1, 0: 1 }, ["s", "0"], (f) => f === "-1"), "-1");
   assert.equal(paneFloor(FLOORS, {}, ["-16"], () => false), null);
+});
+
+test("▲ ▼ by height through the floors that matter (Setzer, 11-25: the floors don't follow a neat order)", () => {
+  const all = Object.fromEntries(FLOORS.map((f) => [f, { 0: ["0_0"] }]));   // map everywhere in view
+  const view = [10, 10, 20, 20];
+  const matters = Object.keys(SETZER);   // s, 4, 0, -4, -5, -11, -13, -14
+  assert.equal(stepFloor(FLOORS, all, "s", 1, view, matters), "0");     // down from the surface: 0, not 10
+  assert.equal(stepFloor(FLOORS, all, "0", 1, view, matters), "-4");    // -1 .. -3 hold nothing: skipped
+  assert.equal(stepFloor(FLOORS, all, "0", -1, view, matters), "s");    // up from 0: the surface
+  assert.equal(stepFloor(FLOORS, all, "s", -1, view, matters), "4");    // up from the surface: floor 4 (1 .. 3 empty)
+  assert.equal(stepFloor(FLOORS, all, "0", 1, view, matters, true), "-1");   // Shift: every floor
+  assert.equal(stepFloor(FLOORS, all, "-14", 1, view, matters), "-15");  // past the last that matters: map in view
+  assert.equal(stepFloor(FLOORS, { "-16": {} }, "-14", 1, view, matters), null);
+  assert.equal(stepFloor(FLOORS, all, "s", 1, view, []), "0");          // nothing matters: the next with map, by height
+});
+
+test("floor links: which floors the link's ropes and portals join", () => {
+  const ms = [
+    { floor: "0", dest: { floor: "3" } }, { floor: "0", dest: { floor: "6" } }, { floor: "s", dest: { floor: "0" } },
+    { floor: "s", dest: { floor: "s" } }, { floor: "-4" },
+  ];
+  assert.deepEqual(floorLinks(ms), { 0: ["6", "3", "s"], 3: ["0"], 6: ["0"], s: ["0"] });
 });
 
 test("a link opens on floors with markers: an empty saved floor is swapped for the busiest one", () => {
