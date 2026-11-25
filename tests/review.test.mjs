@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { encode, decode, saveState, baselineOf } from "../maplink.js";
 import { summarize, warnings, warningCount, diffOf, floorChanges, changeCounts, shareMessage, linkText } from "../review.js";
-import { moved, duplicated, middle, inBox } from "../edits.js";
+import { moved, duplicated, middle, inBox, onFloor } from "../edits.js";
 import { translator } from "../i18n.js";
 
 // a made-up hunt: 3 spawns of two monsters on two floors, one locked context spawn, a note by a spawn, a portal with no
@@ -90,5 +90,9 @@ test("group edits: move, duplicate (a lever keeps its copied area), the middle, 
   assert.deepEqual([copies[1].x, copies[1].z], [6, 3]);
   assert.equal(duplicated([HUNT[9]], 30)[0][0].fields.pull, "w#8");   // alone: the same area as the original
   assert.deepEqual(middle([[0, 0], [10, 4], [3, 9]]), [5, 5]);
+  // to another floor: a destination on its own floor goes along, one on another floor stays where it leads
+  assert.deepEqual(onFloor(portal, "-2").dest, { x: 40, z: 40, floor: "-2" });
+  assert.deepEqual(onFloor(rope, "-2").dest, rope.dest);
+  assert.equal(onFloor(rope, "-2").floor, "-2");
   assert.deepEqual(inBox(HUNT, "-4", [0, 0], [6, 6]).map((m) => m.id), [2, 7, 8, 9, 10]);
 });

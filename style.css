@@ -320,6 +320,7 @@ ul.legend li span { color: var(--muted); font-size: 13px; }
 #diffBar .dc.new i { background: #3ddc84; } #diffBar .dc.edited i { background: #f5a524; }
 #diffBar .dc.removed i { border: 2px dashed #ff6b6e; }
 #diffBar .seg button { min-height: 28px; padding: 2px 10px; font-size: 12.5px; }
+body.review #floorCard:not(.folded) { width: 214px; }
 #floorCard .f .rvc { display: inline-flex; gap: 3px; font-size: 10.5px; font-variant-numeric: tabular-nums; }
 #floorCard .f .rvc .new { color: #3ddc84; } #floorCard .f .rvc .edited { color: #f5a524; } #floorCard .f .rvc .removed { color: #ff8b8e; }
 #panel .tabs { margin: 0 14px 4px; }

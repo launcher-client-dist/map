@@ -1697,6 +1697,7 @@ function setPullDest(x, z, floor) {
   if (!m) { applyTool(); return; }
   pullPending.delete(m.id);
   selected = m.id;
+  $("toast").hidden = true;   // its hint is done
   paintTools();
   setPull(m.id, leverCode({ act: "send", to: { dx: x - m.x, dz: z - m.z, floor } }));
 }
