@@ -6,7 +6,7 @@
 // link's own change list), so the link from Discord, a player's own saved link of it and a reload of either share one
 // draft. The drafts live in localStorage under "opengea.map.draft.<key>", the newest MAX_DRAFTS kept.
 
-import { baselineOf, payloadOf, cleanTitle } from "./maplink.js";
+import { baselineOf, payloadOf, cleanTitle, unflagged } from "./maplink.js";
 
 export const PREFIX = "opengea.map.draft.";
 export const MAX_DRAFTS = 30;
@@ -26,7 +26,8 @@ const bytesOf = (markers, next, title) => payloadOf({ tiles: "", view: { x: 0, z
 export function draftKey(state) {
   if (!state) return "new";
   const b = baselineOf(state);
-  return hash(bytesOf(b.markers, b.next ?? 0, ""));
+  // (a reviewer's flags are no other map: the flagged link shares the draft of the link it flags)
+  return hash(bytesOf(b.markers.map(unflagged), b.next ?? 0, ""));
 }
 
 // What a map holds now (its markers and title): a draft differing from the link being opened is offered back
