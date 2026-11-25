@@ -194,6 +194,27 @@ function buildPanes(floors, view) {
   refresh();
 }
 
+// 1 to 3 floors side by side: the panes kept keep their floors; a new one opens on the next floor down that has
+// markers (floors.js paneFloor), else the next floor down with map in view, never the top of the world
+function setPaneCount(n) {
+  const view = currentView();
+  const floors = view.floors.slice(0, n);
+  const counts = FL.floorCounts(markers);
+  const corners = viewCorners(panes[0]);
+  const hasMap = (f) => { const have = new Set(tileMeta.tiles[f]?.["0"] || []); return FL.tilesInView(corners).some((k) => have.has(k)); };
+  while (floors.length < n) floors.push(FL.paneFloor(tileMeta.floors, counts, floors, hasMap) ?? floors[floors.length - 1]);
+  buildPanes(floors, view);
+}
+
+// the floor selects' words: each floor's name and how many markers it holds
+function floorOptionText(f, counts) {
+  return counts[f] ? t("floorCount", floorLabel(f), counts[f]) : floorLabel(f);
+}
+function paintFloorSelects() {
+  const counts = FL.floorCounts(markers);
+  for (const p of panes) for (const o of p.select.options) o.textContent = floorOptionText(o.value, counts);
+}
+
 function setFloor(p, floor) {
   p.floor = floor;
   if (p.select && p.select.value !== floor) p.select.value = floor;
@@ -211,9 +232,13 @@ let activePane = null;   // the pane the shortcuts move: the last one pointed at
 
 // dir -1: the floor above, +1: the floor below; null when there is none with map here (the rule: floors.js)
 function nextFloor(p, dir) {
+  return FL.nextFloor(tileMeta.floors, tileMeta.tiles, p.floor, dir, viewCorners(p));
+}
+// a pane's view corners in zoom-0 pixels
+function viewCorners(p) {
   const b = p.map.getBounds();
   const a = p.map.project(b.getNorthWest(), 0), c = p.map.project(b.getSouthEast(), 0);
-  return FL.nextFloor(tileMeta.floors, tileMeta.tiles, p.floor, dir, [a.x, a.y, c.x, c.y]);
+  return [a.x, a.y, c.x, c.y];
 }
 
 function stepFloor(p, dir) {
@@ -539,6 +564,7 @@ function refresh() {
   if (tool === "dest" && !canEdit(byId(destFor))) { tool = "select"; destFor = null; paintTools(); }
   for (const p of panes) drawPane(p);
   drawLinksSoon();
+  paintFloorSelects();
   $("undo").disabled = !undoStack.length;
   $("redo").disabled = !redoStack.length;
   renderPanel();
@@ -775,9 +801,29 @@ function paint(floor, cells) {
 // ------------------------------------------------------------------------------------------------ the edit panel
 function select(id) { selected = id; refresh(); }
 
+// A click in the panel after typing in one of its fields: the press moves the focus, the field's change commits and
+// re-renders the panel, and the release lands on a new button, so the click is lost (the first Close, a chip, a
+// stepper, Delete). While a press is held in the panel, its re-render for the same marker waits until the click is
+// through.
+let panelHeld = false, panelStale = false, panelShows = null;
+function hookPanel() {
+  $("panel").addEventListener("pointerdown", () => { panelHeld = true; }, true);
+  const release = () => {
+    if (!panelHeld) return;
+    setTimeout(() => {   // after the click (dispatched with the release, in the same task)
+      panelHeld = false;
+      if (panelStale) { panelStale = false; renderPanel(); }
+    }, 0);
+  };
+  document.addEventListener("pointerup", release, true);
+  document.addEventListener("pointercancel", release, true);
+}
+
 function renderPanel() {
   const panel = $("panel");
   const m = byId(selected);
+  if (panelHeld && m && m.id === panelShows && tool !== "dest" && !panel.hidden) { panelStale = true; return; }
+  panelShows = m && tool !== "dest" ? m.id : null;
   // while a destination is picked the panel steps aside (on a phone it would cover half the map)
   if (!m || tool === "dest") { panel.hidden = true; panel.textContent = ""; return; }
   panel.hidden = false;
@@ -791,7 +837,8 @@ function renderPanel() {
   // floor
   panel.append(el("label", {}, t("field.floor")));
   const fs = el("select", { disabled: !editable });
-  for (const f of tileMeta.floors) fs.append(el("option", { value: f }, floorLabel(f)));
+  const counts = FL.floorCounts(markers);
+  for (const f of tileMeta.floors) fs.append(el("option", { value: f }, floorOptionText(f, counts)));
   fs.value = m.floor;
   fs.addEventListener("change", () => commit(() => { byId(m.id).floor = fs.value; }));
   panel.append(fs);
@@ -832,7 +879,7 @@ function renderPanel() {
   }
   panel.append(el("div", { class: "row" },
     el("button", { type: "button", class: "danger", disabled: !editable && !(STAFF && m.kind in KIND_UI), onclick: deleteSelected }, t("del")),
-    el("button", { type: "button", onclick: () => select(null) }, t("close"))));
+    el("button", { type: "button", "data-act": "close", onclick: () => select(null) }, t("close"))));
 }
 
 // a yes/no field (a teleport-like object's combat lock): a checkbox, 1 when ticked, no field when not
@@ -1128,21 +1175,15 @@ function buildBar() {
     q.set("lang", ls.value);
     location.search = q.toString();   // the #fragment stays
   };
-  $("panes").onchange = () => {
-    const n = +$("panes").value, view = currentView();
-    const floors = view.floors.slice(0, n);
-    while (floors.length < n) {
-      const i = tileMeta.floors.indexOf(floors[floors.length - 1]);
-      floors.push(tileMeta.floors[Math.min(i + 1, tileMeta.floors.length - 1)]);
-    }
-    buildPanes(floors, view);
-  };
+  $("panes").onchange = () => setPaneCount(+$("panes").value);
   const dl = $("monsterList");
   for (const m of [...MONSTERS].sort()) dl.append(el("option", { value: m }));   // the list itself is append only
   // the bosses' names for the boss marker (made here, not in index.html: a cached older index.html still works)
   document.body.append(el("datalist", { id: "bossList" }, BOSSES.map(([name]) => el("option", { value: name }))));
   document.addEventListener("keydown", (e) => {
-    if (e.target.closest("input, textarea, select")) return;
+    // Escape in a select (the floors, the panes) leaves it, then works as it does on the map
+    if (e.key === "Escape" && e.target.closest("select")) e.target.blur();
+    else if (e.target.closest("input, textarea, select")) return;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
@@ -1155,6 +1196,7 @@ function buildBar() {
     else if (e.key === "Escape") { draftRoute = null; selected = null; if (tool !== "select") setTool("select"); else refresh(); }
   });
   window.addEventListener("hashchange", () => location.reload());
+  hookPanel();
 }
 
 async function start() {
@@ -1179,6 +1221,8 @@ async function start() {
     view = state.view;
     const known = (f) => tileMeta.floors.includes(f);
     view.floors = (view.floors.length ? view.floors : ["s"]).map((f) => (known(f) ? f : "s"));
+    // a saved pane on a floor with no markers opens on the busiest floor not shown (the view only: the link is as it was)
+    view.floors = FL.openingFloors(view.floors, FL.floorCounts(markers), markers.filter((m) => m.dest).map((m) => m.dest.floor));
     const lines = changeLines(state);
     if (lines.length) banner(t("linkChanges", lines.length), "", el("button", { type: "button", onclick: () => showChanges(lines) }, t("view")));
   }

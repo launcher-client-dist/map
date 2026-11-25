@@ -20,3 +20,46 @@ export function nextFloor(floors, tiles, current, dir, view) {
   }
   return null;
 }
+
+// how high a floor is: the slices by their number; the surface between floor 0 and floor 1 (the slices 1 .. 10 are
+// buildings' upper floors, 0 and below the ground and the caves under it)
+export const level = (f) => (f === "s" ? 0.5 : +f);
+
+// the markers on each floor: {floor: n}; a floor with none is absent
+export function floorCounts(markers) {
+  const out = {};
+  for (const m of markers) out[m.floor] = (out[m.floor] || 0) + 1;
+  return out;
+}
+
+// The floor a new side-by-side pane opens on. shown: the panes' floors now. The next floor down from the last pane
+// that has markers and isn't shown; else the nearest one up; with no markers left, the next floor down from the last
+// pane (then up) that has map in the view (hasMap(floor)), never just the next entry of the list (the top of the
+// world, floor 10, from the surface). null: nothing to add.
+export function paneFloor(floors, counts, shown, hasMap = () => true) {
+  const last = level(shown[shown.length - 1] ?? "s");
+  const free = floors.filter((f) => !shown.includes(f));
+  const pick = (list) => {
+    const down = list.filter((f) => level(f) < last).sort((a, b) => level(b) - level(a));
+    const up = list.filter((f) => level(f) > last).sort((a, b) => level(a) - level(b));
+    return down[0] ?? up[0] ?? null;
+  };
+  return pick(free.filter((f) => counts[f] > 0))
+    ?? pick(free.filter((f) => hasMap(f)))
+    ?? null;
+}
+
+// The floors a link opens on: its saved panes, each one with no markers swapped for the busiest floor not shown yet
+// (the link's own choice stays when it has markers there, or the end of a rope, hole or portal: landings; a link with
+// no markers at all opens as saved).
+export function openingFloors(saved, counts, landings = []) {
+  if (!Object.keys(counts).length) return saved.slice();
+  const busiest = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || level(b) - level(a));
+  const out = [];
+  for (const f of saved) {
+    if ((counts[f] > 0 || landings.includes(f)) && !out.includes(f)) { out.push(f); continue; }
+    const next = busiest.find((b) => !out.includes(b) && !saved.includes(b));
+    out.push(next ?? f);
+  }
+  return out;
+}

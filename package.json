@@ -1,5 +1,5 @@
 {
  "private": true,
  "type": "module",
- "scripts": {"test": "node --test tests/maplink.test.mjs"}
+ "scripts": {"test": "node --test tests/maplink.test.mjs tests/ui.test.mjs"}
 }
