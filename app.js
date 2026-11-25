@@ -147,8 +147,9 @@ function commit(fn) {
   redoStack.length = 0;
   refresh();
 }
-function undo() { if (!undoStack.length) return; redoStack.push(snapshot()); restore(undoStack.pop()); refresh(); }
-function redo() { if (!redoStack.length) return; undoStack.push(snapshot()); restore(redoStack.pop()); refresh(); }
+// (Review is look only: no undo or redo there either)
+function undo() { if (!undoStack.length || mode !== "edit") return; redoStack.push(snapshot()); restore(undoStack.pop()); refresh(); }
+function redo() { if (!redoStack.length || mode !== "edit") return; undoStack.push(snapshot()); restore(redoStack.pop()); refresh(); }
 
 // ------------------------------------------------------------------------------------------------ tiles
 const TileLayer = L.TileLayer.extend({
@@ -1472,6 +1473,7 @@ function setMode(v) {
   if (tool === "route") finishRoute();
   mode = v;
   document.body.classList.toggle("review", mode === "review");
+  $("mapTitle").readOnly = mode !== "edit";
   paintSeg("data-mode", mode);
   if (mode === "review") { tool = "select"; destFor = null; toast(t("reviewSoon")); }
   applyTool();
@@ -1736,7 +1738,7 @@ function buildBar() {
   tb.addEventListener("input", () => { document.title = ML.cleanTitle(tb.value) ? t("titleWith", ML.cleanTitle(tb.value)) : t("title"); });
   tb.addEventListener("change", () => {
     const v = ML.cleanTitle(tb.value);
-    if (v === mapTitle) { tb.value = mapTitle; return; }
+    if (v === mapTitle || mode !== "edit") { tb.value = mapTitle; return; }
     commit(() => { mapTitle = v; });
     showTitle();
   });
