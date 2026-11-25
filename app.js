@@ -7,7 +7,7 @@ import { MONSTERS } from "./monsters.js";
 import { LANGS, pickLang, translator } from "./i18n.js";
 import { parseSchedule, scheduleCode, scheduleText } from "./schedule.js";
 import { BOSSES, bossOf } from "./bosses.js";
-import { parseLever, leverCode, leverText, wallCells, MAX_WALLS } from "./lever.js";
+import { parseLever, leverCode, leverText, wallCells, rebased, MAX_WALLS } from "./lever.js";
 import * as RV from "./review.js";
 import * as ED from "./edits.js";
 
@@ -590,7 +590,7 @@ function drawMarker(p, m) {
     if (pickSpot(p, e.latlng, e.originalEvent)) return;
     if (tool === "area" || tool === "route") return;
     // Shift+click: add it to the selection, or take it off
-    if (e.originalEvent?.shiftKey && mode === "edit") { toggleMulti(m.id); return; }
+    if (e.originalEvent?.shiftKey && mode === "edit" && tool === "select") { toggleMulti(m.id); return; }
     // a place tool picks up a spawn's settings when one is tapped (the stamp: its monster, count and radius)
     if (tool === "spawn" && m.kind === "spawn") takeStamp(m);
     select(m.id);
@@ -607,7 +607,13 @@ function drawMarker(p, m) {
     mk.on("dragend", () => {
       const [x, z] = cellOf(mk.getLatLng());
       if (multi.has(m.id)) { moveGroupBy(x - m.x, z - m.z); return; }   // one of a group: the group moves
-      commit(() => { const n = byId(m.id); if (!n || (n.x === x && n.z === z)) return false; n.x = x; n.z = z; });
+      commit(() => {
+        const n = byId(m.id);
+        if (!n || (n.x === x && n.z === z)) return false;
+        // a lever dragged alone: its walls and where it sends stay put (its code is relative to it)
+        if (n.fields?.pull) { const c = rebased(n.fields.pull, x - n.x, z - n.z); if (c) n.fields.pull = c; else delete n.fields.pull; }
+        n.x = x; n.z = z;
+      });
     });
     const label = labelOf(m), d = destOf(m), away = d && d.floor !== m.floor ? leadsText(d.floor) : "";
     const text = [label, away, m.fields?.combat ? "⚔ " + t("combatOn") : ""].filter(Boolean).join(" · ");
@@ -844,17 +850,23 @@ function stampBar(sub) {
     const input = el("input", { type: "text", maxlength: 60, list: "monsterList", autocomplete: "off", class: "st-mon",
       placeholder: t("monsterPlaceholder"), "aria-label": t("field.monster") });
     input.value = stamp.monster;
+    // a typed field updates the stamp in place, no repaint: a click right after typing (a radius, a chip, Done) must
+    // land on the button it was pressed on (the change fires between its press and its release)
     input.addEventListener("change", () => {
       const typed = input.value.trim();
       stamp.monster = MONSTERS.find((x) => x.toLowerCase() === typed.toLowerCase()) || typed;
       input.value = stamp.monster;
-      paintTools();
+      for (const c of sub.querySelectorAll(".st-chips .chip")) {
+        const on = c.dataset.name === stamp.monster;
+        c.classList.toggle("on", on);
+        c.setAttribute("aria-pressed", String(on));
+      }
     });
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); });
     const n = el("input", { type: "number", min: F.count.min, max: F.count.max, inputmode: "numeric", "aria-label": t("field.count") });
     n.value = stamp.count;
-    n.addEventListener("change", () => { stamp.count = clampInt(n.value, F.count); paintTools(); });
-    const step = (d) => { stamp.count = clampInt(stamp.count + d, F.count); paintTools(); };
+    n.addEventListener("change", () => { stamp.count = clampInt(n.value, F.count); n.value = stamp.count; });
+    const step = (d) => { stamp.count = clampInt((clampInt(n.value, F.count) || stamp.count) + d, F.count); paintTools(); };
     sub.append(input, el("div", { class: "stepper" },
       el("button", { type: "button", "aria-label": "−1", onclick: () => step(-1) }, "−"), n,
       el("button", { type: "button", "aria-label": "+1", onclick: () => step(1) }, "+")));
@@ -868,7 +880,7 @@ function stampBar(sub) {
     const species = speciesOnMap().slice(0, 8);
     if (species.length) {
       sub.append(el("div", { class: "chips st-chips" }, species.map(([name, s]) =>
-        el("button", { type: "button", class: "chip" + (name === stamp.monster ? " on" : ""), "aria-pressed": String(name === stamp.monster),
+        el("button", { type: "button", class: "chip" + (name === stamp.monster ? " on" : ""), "aria-pressed": String(name === stamp.monster), "data-name": name,
           onclick: () => { stamp.monster = name; paintTools(); } }, name, el("i", {}, String(s.n))))));
     }
   }
@@ -1686,7 +1698,8 @@ function toggleWall(p, x, z) {
   if (i >= 0) cells.splice(i, 1);
   else if (cells.length >= MAX_WALLS) return;
   else cells.push([x - m.x, z - m.z]);
-  setPull(m.id, leverCode({ act: "walls", secs: cur.act === "walls" ? cur.secs : 0, cells }));
+  // (the timer kept: the code's, or the one set before switching from an area to cells)
+  setPull(m.id, leverCode({ act: "walls", secs: cur.act === "walls" ? cur.secs : pullPending.get(m.id)?.secs || 0, cells }));
   paintTools();
 }
 
@@ -1794,6 +1807,10 @@ async function shareParts() {
 async function save() {
   finishRoute();
   const d = $("dialog");
+  // the dialog's buttons act on what it shows now: a name typed and then a click on Copy (the name's change fires
+  // between the press and the click, and starts a new render) waits for that render and copies its message
+  let cur = null, pending = null;
+  const act = (k, fn) => async () => { await pending; fn(cur[k]); };
   const render = async () => {
     const { frag, url, saved, message } = await shareParts();
     // the address bar: the saved link, ?staff kept, ?title dropped (the fragment holds the title now)
@@ -1803,6 +1820,7 @@ async function save() {
     const lines = changeLines(saved);
     // the file (past the limit): the message, then the whole change list (the link inside it, unchanged)
     const file = message + (lines.length ? "\n\n" + t("fileList") + "\n" + lines.join("\n") : "");
+    cur = { url, message, file };
     d.textContent = "";
     d.classList.add("share");
     d.append(el("div", { class: "dh" }, el("h2", {}, t("share")), el("button", { type: "button", class: "x", "aria-label": t("close"), onclick: () => d.close() }, "✕")),
@@ -1814,7 +1832,7 @@ async function save() {
       if (v === mapTitle || mode !== "edit") return;
       commit(() => { mapTitle = v; });
       showTitle();
-      render();
+      pending = render();
     });
     name.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); name.blur(); } });
     if (mode !== "edit") name.readOnly = true;
@@ -1837,12 +1855,13 @@ async function save() {
     const over = url.length > LINK_MAX || n > LINK_MAX;
     if (over) d.append(el("p", { class: "warn" }, t("overFile", num(url.length), num(n))));
     d.append(el("div", { class: "row" },
-      el("button", { type: "button", "data-act": "copylink", onclick: () => copy(url, true) }, t("copyLink")),
-      el("button", { type: "button", class: over ? "" : "primary", "data-act": "copymsg", onclick: () => copy(message, true) }, t("copyAll")),
-      el("button", { type: "button", class: over ? "primary" : "", "data-act": "download", onclick: () => download(file) }, "⬇ " + t("downloadFile")),
+      el("button", { type: "button", "data-act": "copylink", onclick: act("url", (v) => copy(v, true)) }, t("copyLink")),
+      el("button", { type: "button", class: over ? "" : "primary", "data-act": "copymsg", onclick: act("message", (v) => copy(v, true)) }, t("copyAll")),
+      el("button", { type: "button", class: over ? "primary" : "", "data-act": "download", onclick: act("file", download) }, "⬇ " + t("downloadFile")),
       el("button", { type: "button", onclick: () => d.close() }, t("close"))));
   };
-  await render();
+  pending = render();
+  await pending;
   if (!d.open) d.showModal();
 }
 

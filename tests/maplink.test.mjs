@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { inflateRawSync, deflateRawSync } from "node:zlib";
 import { readFileSync } from "node:fs";
 import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, cleanTitle, LinkError, KINDS, KIND_CODE, CORE_KINDS, FORMAT, outlinesOf, monsterIndex, COLORS } from "../maplink.js";
-import { parseLever, leverCode, leverText, wallCells, remapArea, MAX_WALLS } from "../lever.js";
+import { parseLever, leverCode, leverText, wallCells, remapArea, rebased, MAX_WALLS } from "../lever.js";
 import { MONSTERS } from "../monsters.js";
 import { WORDS, LANGS, translator } from "../i18n.js";
 import { parseSchedule, scheduleCode, scheduleText, windowTag } from "../schedule.js";
@@ -513,6 +513,12 @@ test("a lever's action: each form's code, its words, caps, and an unknown code k
   assert.deepEqual(wallCells({ x: 0, z: 0, fields: { pull: "w#5" } }, [{ id: 5, cells: [[1, 1]] }]), [[1, 1]]);
   assert.equal(remapArea("w9#5", { 5: 8 }), "w9#8");
   assert.equal(remapArea("w9#5", { 6: 8 }), "w9#5");
+  // a lever dragged alone by (2, -1): its walls and its target stay where they are on the map; an area's stays as is
+  assert.equal(rebased("w30|1,0|0,-1", 2, -1), "w30|-1,1|-2,0");
+  assert.deepEqual(wallCells({ x: 12, z: 19, fields: { pull: rebased("w|1,0|0,-1", 2, -1) } }, []), [[11, 20], [10, 19]]);
+  assert.equal(rebased("s|5,-3,-4", 2, -1), "s|3,-2,-4");
+  assert.equal(rebased("w#5", 2, -1), "w#5");
+  assert.equal(rebased("", 2, -1), "");
 });
 
 test("what the new fields cost: nothing when unused, a few characters each when used", async () => {

@@ -78,6 +78,15 @@ export function wallCells(lever, markers) {
   return p.cells.map(([dx, dz]) => [lever.x + dx, lever.z + dz]);
 }
 
+// the code of a lever dragged by (dx, dz) alone: its wall cells and where it sends stay where they are on the map (as a
+// rope's landing stays when the rope is dragged); a group's move or a duplicate keeps the code, so they travel along
+export function rebased(s, dx, dz) {
+  const p = parseLever(s);
+  if (p.act === "send") return leverCode({ ...p, to: { ...p.to, dx: p.to.dx - dx, dz: p.to.dz - dz } });
+  if (p.act === "walls" && p.cells) return leverCode({ ...p, cells: p.cells.map(([x, z]) => [x - dx, z - dz]) });
+  return String(s ?? "");
+}
+
 // the code with every area reference changed by ids (a map {old: new}): a lever duplicated with its area
 export function remapArea(s, ids) {
   const p = parseLever(s);
