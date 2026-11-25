@@ -22,10 +22,10 @@ function hash(bytes) {
 const bytesOf = (markers, next, title) => payloadOf({ tiles: "", view: { x: 0, z: 0, zoom: 0, floors: ["s"] }, base: next, next,
   markers: [...markers].sort((a, b) => a.id - b.id), was: [], title: cleanTitle(title) }, 1);
 
-// The draft key of an opened link's decoded state (null: a page opened with no link: one draft for a new map)
+// The draft key of an opened link's decoded state (null: a page opened with no link: an empty map, the same key as
+// the link its first edit writes into the address bar, whose baseline is empty too)
 export function draftKey(state) {
-  if (!state) return "new";
-  const b = baselineOf(state);
+  const b = state ? baselineOf(state) : { markers: [], next: 0 };
   return hash(bytesOf(b.markers, b.next ?? 0, ""));
 }
 

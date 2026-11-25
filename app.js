@@ -208,17 +208,19 @@ async function keep() {
     frag = await ML.encode(state);
   } catch { return; }
   if (seq !== keepSeq) return;
-  setAddress(frag);
+  // the draft first (the address bar can refuse: a browser limits replaceState calls)
   const work = ML.changes(state).length > 0 || ML.cleanTitle(mapTitle) !== openedTitle;
   if (work) drafts.put(draftKey, { frag, at: Date.now(), sig: DR.signature(markers, mapTitle), changes: ML.changes(state).length });
   else drafts.drop(draftKey);
   unshared = work;
+  setAddress(frag);
 }
 // the address bar on a fragment: ?staff kept, ?title dropped (the fragment holds the title); no reload, no history step
 function setAddress(frag) {
   const here = new URLSearchParams(location.search);
   here.delete("title");
-  history.replaceState(null, "", location.pathname + (here.toString() ? "?" + here : "") + "#" + frag);
+  try { history.replaceState(null, "", location.pathname + (here.toString() ? "?" + here : "") + "#" + frag); }
+  catch { /* too many calls in a short time: the next edit writes it */ }
 }
 
 // ------------------------------------------------------------------------------------------------ tiles

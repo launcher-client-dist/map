@@ -48,7 +48,12 @@ test("one draft key for the sent link, a player's saved link of it and a reload 
   const other = structuredClone(SENT);
   other.markers[1].x = 9;
   assert.notEqual(draftKey(await decode(await encode(other))), draftKey(sent));
-  assert.equal(draftKey(null), "new");
+  // a page opened with no link, and the link its first edit writes into the address bar (a reload opens that): one key
+  const blank = { markers: [], next: 0, base: 0, was: [] };
+  const first = await decode(await encode(saveState(blank, [{ id: 0, kind: "poi", floor: "s", locked: false, x: 3, z: 4, fields: {} }],
+    SENT.view, SENT.tiles, 1, "")));
+  assert.equal(draftKey(null), draftKey(first));
+  assert.notEqual(draftKey(null), draftKey(sent));
   // the view and the title don't make another map
   assert.equal(draftKey(await decode(await encode({ ...SENT, view: { x: 99, z: 9, zoom: 0, floors: ["-4"] }, title: "x" }))), draftKey(sent));
 });
