@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inflateRawSync, deflateRawSync } from "node:zlib";
 import { readFileSync } from "node:fs";
-import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, cleanTitle, LinkError, KINDS, KIND_CODE, CORE_KINDS, FORMAT, outlinesOf, monsterIndex, COLORS } from "../maplink.js";
+import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, cleanTitle, LinkError, KINDS, KIND_CODE, CORE_KINDS, FORMAT, outlinesOf, monsterIndex, COLORS, FLAG, flagged, same } from "../maplink.js";
 import { parseLever, leverCode, leverText, wallCells, remapArea, rebased, MAX_WALLS } from "../lever.js";
 import { MONSTERS } from "../monsters.js";
 import { WORDS, LANGS, translator } from "../i18n.js";
@@ -453,8 +453,8 @@ test("the new fields: set, round trip in both formats, unset gives the link as b
   const back = withNew();
   for (const m of back.markers) for (const k of ["note", "color", "pull"]) delete m.fields[k];
   assert.equal(await encode(back), SMALL.every);
-  assert.deepEqual(KINDS[KIND_CODE.lever].extra, [["combat", "int"], ["pull", "str"]]);
-  assert.deepEqual(KINDS[KIND_CODE.portal].extra, [["combat", "int"], ["color", "int"]]);
+  assert.deepEqual(KINDS[KIND_CODE.lever].extra.slice(0, -1), [["combat", "int"], ["pull", "str"]]);   // (then the flag)
+  assert.deepEqual(KINDS[KIND_CODE.portal].extra.slice(0, -1), [["combat", "int"], ["color", "int"]]);
   assert.equal(COLORS[0], "");
 });
 
@@ -534,4 +534,48 @@ test("what the new fields cost: nothing when unused, a few characters each when 
   ]) { const s = structuredClone(SMALL.state); set(s); out[name] = (await len(s)) - base; }
   console.log("link characters added on a 15-marker map of", base, "characters:", JSON.stringify(out));
   for (const [name, n] of Object.entries(out)) assert.ok(n > 0 && n <= 40, name + ": " + n);
+});
+
+// ---- a reviewer's flag: the last extra field of every kind (made-up markers)
+const withFlags = () => {
+  const s = structuredClone(SMALL.state);
+  s.markers.forEach((m, i) => { if (i % 3 === 0) m.fields = { ...m.fields, [FLAG]: "problem " + i }; });
+  return s;
+};
+
+test("a flag: every kind's last extra field, round trip in both formats, unset gives the link as before", async () => {
+  assert.ok(KINDS.every((k) => k.extra && k.extra[k.extra.length - 1][0] === FLAG));
+  const s = withFlags();
+  assert.ok(new Set(s.markers.filter((m) => m.fields[FLAG]).map((m) => m.kind)).size >= 3);
+  assert.deepEqual((await decode(await encode(s))).markers, s.markers);
+  const v1 = "1." + Buffer.from(deflateRawSync(payloadOf(s, 1))).toString("base64url");
+  assert.deepEqual((await decode(v1)).markers, s.markers);
+  assert.equal(await encode(SMALL.state), SMALL.every);   // no flag: the frozen fragment
+  assert.deepEqual(flagged(s.markers).map((m) => m.id), s.markers.filter((_, i) => i % 3 === 0).map((m) => m.id));
+});
+
+test("a flag is not a change: same(), changes, Save's was and the baseline leave it out", async () => {
+  const opened = await decode(await encode(SMALL.state));
+  const now = structuredClone(withFlags().markers);
+  assert.ok(same(opened.markers[0], now[0]));
+  const saved = saveState(opened, now, opened.view, opened.tiles, opened.next);
+  assert.deepEqual(saved.was, []);
+  const back = await decode(await encode(saved));
+  assert.deepEqual(changes(back), []);
+  assert.equal(flagged(back.markers).length, flagged(now).length);
+  // a real change beside a flag: only the change
+  now[1].x += 3;
+  const two = await decode(await encode(saveState(opened, now, opened.view, opened.tiles, opened.next)));
+  assert.deepEqual(changes(two).map((c) => [c.op, c.id]), [["moved", now[1].id]]);
+  assert.equal(baselineOf(two).markers.find((m) => m.id === now[0].id).fields[FLAG], "problem 0");
+});
+
+test("a flag on an older page (kinds without it): dropped, everything else kept", async () => {
+  const frag = await encode(withFlags());
+  const saved = KINDS.map((k) => k.extra);
+  try {
+    KINDS.forEach((k) => { k.extra = k.extra.filter(([n]) => n !== FLAG); if (!k.extra.length) delete k.extra; });
+    const old = await decode(frag);
+    assert.deepEqual(old.markers, SMALL.state.markers);
+  } finally { KINDS.forEach((k, i) => { k.extra = saved[i]; }); }
 });
