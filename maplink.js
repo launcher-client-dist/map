@@ -83,28 +83,34 @@ export function cleanTitle(text) {
 // Marker kinds by code: append only, a code is never reused. extra: fields added to a kind after format 2 packed its
 // fields as bits, keyed after them (index fields.length + j): in a format-1 body as any field (an older page skips the
 // key), in a format-2 record in the extra section of link flag 1 (an older page reads past it). Unset, a link is byte
-// for byte what it was. combat: a teleport-like object that can't be used while the player is in battle (1; absent: no
-// lock).
-const COMBAT = [["combat", "int"]];
+// for byte what it was. Each kind's extra list only grows at its end (a field's key is its place). The extra fields:
+//   combat: a teleport-like object that can't be used while the player is in battle (1; absent: no lock)
+//   note (spawn): an observation shown under the monster's name
+//   color (area, portal): an index in COLORS (absent: the kind's own colour)
+//   pull (lever): what pulling it does, lever.js's compact code (absent: not said)
+const COMBAT = ["combat", "int"];
 export const KINDS = [
-  { name: "spawn", geometry: "point", fields: [["monster", "str"], ["count", "int"], ["radius", "int"]] },
+  { name: "spawn", geometry: "point", fields: [["monster", "str"], ["count", "int"], ["radius", "int"]], extra: [["note", "str"]] },
   { name: "poi", geometry: "point", fields: [["label", "str"]] },
-  { name: "area", geometry: "cells", fields: [["label", "str"]] },
+  { name: "area", geometry: "cells", fields: [["label", "str"]], extra: [["color", "int"]] },
   { name: "route", geometry: "line", fields: [["label", "str"]] },
   { name: "note", geometry: "point", fields: [["text", "str"]] },
   // map things: ropes, holes and portals lead somewhere (an optional destination, on any floor)
-  { name: "rope", geometry: "pointdest", fields: [["label", "str"]], extra: COMBAT },
-  { name: "lever", geometry: "point", fields: [["label", "str"]], extra: COMBAT },
-  { name: "hole", geometry: "pointdest", fields: [["label", "str"]], extra: COMBAT },
+  { name: "rope", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT] },
+  { name: "lever", geometry: "point", fields: [["label", "str"]], extra: [COMBAT, ["pull", "str"]] },
+  { name: "hole", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT] },
   { name: "door", geometry: "point", fields: [["label", "str"]] },
-  { name: "portal", geometry: "pointdest", fields: [["label", "str"]], extra: COMBAT },
-  { name: "elevator", geometry: "pointdest", fields: [["label", "str"]], extra: COMBAT },
+  { name: "portal", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT, ["color", "int"]] },
+  { name: "elevator", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT] },
   // from CORE_KINDS on: each one a length and a format-1 body (a page from before keeps it as raw bytes)
-  { name: "rope2", geometry: "pointdest", fields: [["label", "str"]], extra: COMBAT },   // a two-way rope: goes and comes back
+  { name: "rope2", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT] },   // a two-way rope: goes and comes back
   { name: "boss", geometry: "point", fields: [["monster", "str"], ["schedule", "str"], ["label", "str"]] },
   { name: "npc", geometry: "point", fields: [["name", "str"], ["schedule", "str"], ["label", "str"]] },
 ];
 export const KIND_CODE = Object.fromEntries(KINDS.map((k, i) => [k.name, i]));
+// The colours an area or a portal can wear, by the index the color field holds (append only; 0 is never written: no
+// field is the kind's own colour). The page holds their shades; the staff tools their names.
+export const COLORS = ["", "yellow", "green", "pink", "red", "white", "blue", "purple", "orange"];
 // a kind's fields, then its extra ones (format 1 keys them in this order)
 export const allFields = (k) => (k.extra ? [...k.fields, ...k.extra] : k.fields);
 

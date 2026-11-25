@@ -2,7 +2,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inflateRawSync, deflateRawSync } from "node:zlib";
-import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, cleanTitle, LinkError, KINDS, KIND_CODE, CORE_KINDS, FORMAT, outlinesOf, monsterIndex } from "../maplink.js";
+import { readFileSync } from "node:fs";
+import { encode, decode, changes, saveState, baselineOf, runsOf, floorCode, floorOf, payloadOf, cleanTitle, LinkError, KINDS, KIND_CODE, CORE_KINDS, FORMAT, outlinesOf, monsterIndex, COLORS } from "../maplink.js";
+import { parseLever, leverCode, leverText, wallCells, remapArea, MAX_WALLS } from "../lever.js";
 import { MONSTERS } from "../monsters.js";
 import { WORDS, LANGS, translator } from "../i18n.js";
 import { parseSchedule, scheduleCode, scheduleText, windowTag } from "../schedule.js";
@@ -406,8 +408,124 @@ test("combat lock: a teleport-like object's extra field, set, unset (the link as
   assert.deepEqual((await decode(await encode(locked))).markers, locked.markers);
   const v1 = "1." + Buffer.from(deflateRawSync(payloadOf(locked, 1))).toString("base64url");
   assert.deepEqual((await decode(v1)).markers, locked.markers);
-  for (const k of ["rope", "rope2", "lever", "hole", "portal", "elevator"]) assert.deepEqual(KINDS[KIND_CODE[k]].extra, [["combat", "int"]], k);
+  for (const k of ["rope", "rope2", "lever", "hole", "portal", "elevator"]) assert.deepEqual(KINDS[KIND_CODE[k]].extra[0], ["combat", "int"], k);
   const opened = await decode(await encode(s));
   const saved = await decode(await encode(saveState(opened, locked.markers, opened.view, opened.tiles, 3)));
   assert.deepEqual(changes(saved).map((c) => [c.op, c.id, c.field, c.new]), [["edited", 0, "combat", 1], ["edited", 1, "combat", 1]]);
+});
+
+// ---- the fields of round 2: a spawn's note, an area's and a portal's colour, a lever's action (extra fields: a map
+// without them is byte for byte what it was; an older page opens a map with them and drops them)
+const SMALL = JSON.parse(readFileSync(new URL("./fixtures/small_map.json", import.meta.url)));
+
+test("a map without the new fields: the same fragment as before them (frozen)", async () => {
+  assert.equal(await encode(SMALL.state), SMALL.every);
+  const combat = structuredClone(SMALL.state);
+  for (const i of [6, 7, 12]) combat.markers[i].fields.combat = 1;
+  assert.equal(await encode(combat), SMALL.combat);
+});
+
+const withNew = () => {
+  const s = structuredClone(SMALL.state);
+  s.markers[0].fields.note = "they come at night";
+  s.markers[3].fields.color = 1;
+  s.markers[10].fields.color = 7;
+  s.markers[7].fields.pull = "w30|1,0|2,0";
+  return s;
+};
+
+test("the new fields: set, round trip in both formats, unset gives the link as before", async () => {
+  const s = withNew();
+  // the link flags (this map's head: version, tiles, view, 2 panes, base, next, counts): 0 before, 1 with them
+  assert.equal(payloadOf(SMALL.state)[17], 0);
+  assert.equal(payloadOf(s)[17], 1);
+  assert.deepEqual((await decode(await encode(s))).markers, s.markers);
+  const v1 = "1." + Buffer.from(deflateRawSync(payloadOf(s, 1))).toString("base64url");
+  assert.deepEqual((await decode(v1)).markers, s.markers);
+  // each one alone, and with the combat lock
+  for (const [i, name, v] of [[0, "note", "x"], [3, "color", 4], [10, "color", 6], [7, "pull", "s|3,-2,-4"], [7, "pull", "w#3"]]) {
+    const one = structuredClone(SMALL.state);
+    one.markers[i].fields[name] = v;
+    one.markers[10].fields.combat = 1;
+    assert.deepEqual((await decode(await encode(one))).markers, one.markers, name);
+  }
+  // cleared again (the field gone, not 0 or ""): the frozen fragment
+  const back = withNew();
+  for (const m of back.markers) for (const k of ["note", "color", "pull"]) delete m.fields[k];
+  assert.equal(await encode(back), SMALL.every);
+  assert.deepEqual(KINDS[KIND_CODE.lever].extra, [["combat", "int"], ["pull", "str"]]);
+  assert.deepEqual(KINDS[KIND_CODE.portal].extra, [["combat", "int"], ["color", "int"]]);
+  assert.equal(COLORS[0], "");
+});
+
+test("the new fields: an older page (kinds without them) opens the map and drops only them", async () => {
+  const frag = await encode(withNew()), frag1 = "1." + Buffer.from(deflateRawSync(payloadOf(withNew(), 1))).toString("base64url");
+  const saved = KINDS.map((k) => k.extra);
+  try {
+    for (const k of KINDS) if (k.extra) k.extra = k.extra.filter(([n]) => n === "combat");
+    for (const k of KINDS) if (k.extra && !k.extra.length) delete k.extra;
+    for (const f of [frag, frag1]) {
+      const s = await decode(f);
+      const want = structuredClone(SMALL.state).markers;
+      assert.deepEqual(s.markers, want);
+      assert.equal(s.title, SMALL.state.title);
+    }
+  } finally { KINDS.forEach((k, i) => { if (saved[i]) k.extra = saved[i]; }); }
+});
+
+test("the new fields are their own changes", async () => {
+  const opened = await decode(await encode(SMALL.state));
+  const s = withNew();
+  const saved = await decode(await encode(saveState(opened, s.markers, opened.view, opened.tiles, 15, s.title)));
+  assert.deepEqual(changes(saved).map((c) => [c.op, c.id, c.field, c.new]),
+    [["edited", 0, "note", "they come at night"], ["edited", 3, "color", 1], ["edited", 7, "pull", "w30|1,0|2,0"], ["edited", 10, "color", 7]]);
+});
+
+test("a lever's action: each form's code, its words, caps, and an unknown code kept", () => {
+  const t = translator("en");
+  for (const [code, p] of [
+    ["", { act: "none" }],
+    ["w|1,0|2,0", { act: "walls", secs: 0, cells: [[1, 0], [2, 0]] }],
+    ["w30|-1,-2", { act: "walls", secs: 30, cells: [[-1, -2]] }],
+    ["w#12", { act: "walls", secs: 0, area: 12 }],
+    ["w120#3", { act: "walls", secs: 120, area: 3 }],
+    ["s|5,-3,-4", { act: "send", to: { dx: 5, dz: -3, floor: "-4" } }],
+    ["s|0,0,s", { act: "send", to: { dx: 0, dz: 0, floor: "s" } }],
+  ]) {
+    assert.deepEqual(parseLever(code), p, code);
+    assert.equal(leverCode(p), code, code);
+  }
+  for (const odd of ["w", "w0|1,1", "w3601|1,1", "x|1", "s|1,2", "w|1,2|"]) assert.equal(parseLever(odd).act, "other", odd);
+  assert.equal(leverCode({ act: "other", text: "w" }), "w");
+  // cells once each, at most MAX_WALLS, never past a field's 300 characters
+  const many = Array.from({ length: 50 }, (_, i) => [i, -i]);
+  assert.equal(parseLever(leverCode({ act: "walls", cells: [...many, [0, 0]] })).cells.length, MAX_WALLS);
+  const far = Array.from({ length: 40 }, (_, i) => [-9000 - i, -9000]);
+  const code = leverCode({ act: "walls", secs: 3600, cells: far });
+  assert.ok(code.length <= 300 && parseLever(code).act === "walls", code.length);
+  assert.equal(leverCode({ act: "walls", cells: [] }), "");
+  assert.equal(leverText("w30|1,0|2,0", t), "opens 2 wall cells · they close on their own after 30 s");
+  assert.equal(leverText("w#4", t), "opens the walls of area #4 · they stay open until it is pulled again");
+  assert.equal(leverText("s|5,-3,-4", t, { x: 10, z: 10 }, (f) => "floor " + f), "takes the player to x 15, z 7 (floor -4)");
+  // relative cells: the lever's wall cells follow it; an area's are the area's
+  const lever = { x: 10, z: 20, fields: { pull: "w|1,0|0,-1" } };
+  assert.deepEqual(wallCells(lever, []), [[11, 20], [10, 19]]);
+  assert.deepEqual(wallCells({ x: 0, z: 0, fields: { pull: "w#5" } }, [{ id: 5, cells: [[1, 1]] }]), [[1, 1]]);
+  assert.equal(remapArea("w9#5", { 5: 8 }), "w9#8");
+  assert.equal(remapArea("w9#5", { 6: 8 }), "w9#5");
+});
+
+test("what the new fields cost: nothing when unused, a few characters each when used", async () => {
+  const len = async (s) => (await encode(s)).length;
+  const base = await len(SMALL.state), out = {};
+  for (const [name, set] of [
+    ["spawn note (18 chars)", (s) => { s.markers[0].fields.note = "they come at night"; }],
+    ["area colour", (s) => { s.markers[3].fields.color = 1; }],
+    ["portal colour", (s) => { s.markers[10].fields.color = 7; }],
+    ["lever: 2 wall cells, 30 s", (s) => { s.markers[7].fields.pull = "w30|1,0|2,0"; }],
+    ["lever: an area", (s) => { s.markers[7].fields.pull = "w#3"; }],
+    ["lever: sends to", (s) => { s.markers[7].fields.pull = "s|12,-7,-4"; }],
+  ]) { const s = structuredClone(SMALL.state); set(s); out[name] = (await len(s)) - base; }
+  console.log("link characters added on a 15-marker map of", base, "characters:", JSON.stringify(out));
+  for (const [name, n] of Object.entries(out)) assert.ok(n > 0 && n <= 40, name + ": " + n);
 });
