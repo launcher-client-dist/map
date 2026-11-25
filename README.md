@@ -46,6 +46,10 @@ and posts the new link (with its list of changes) back in their ticket.
   hides the rest; the floors card counts the changes per floor; the **Changes** tab lists them (a click goes there).
 - **Share:** the map's name (editable there), the message as Discord shows it, summary first: the name as the link,
   what it proposes and its objects, its changes counted (the list opens in the link's "View"); the meter; what to check.
+- **Nothing is lost:** after each edit the address bar holds the edited map (a reload keeps it), and this browser keeps
+  it as a draft of the link it was opened from (the newest 30 drafts). Opening that link again, from Discord or a
+  player's own saved link of it, offers the draft back: "Recover the draft from 18:20?" (**Recover** / **Discard**).
+  Closing or leaving the page with edits not yet copied or downloaded from Share asks first.
 - **Markers:** monster spawn (the monster typed, or picked from the ones already on this map; how many, − / +; the
   radius as buttons, the circle and a sentence saying what it means; how many of that monster the map holds; an
   **observation**, shown under its name with ✎ on the marker), boss (picked from the game's bosses or any name typed, when
@@ -122,6 +126,8 @@ The same two maps saved as format 2:
   `goto.js`: what a text in Go to means (a `/pos`, `x, z`, a floor, a search). No DOM; `tests/ui.test.mjs`.
 - `lever.js`: a lever's action code and its words; `review.js`: the summary, the checks, the diff and Share's
   message; `edits.js`: moving, duplicating and boxing several markers. No DOM; `tests/review.test.mjs`.
+- `draft.js`: the drafts this browser keeps (their key: the opened link's baseline; when one is offered). No DOM;
+  `tests/draft.test.mjs`.
 - `tiles/<client version>/<floor>/<zoom>/<x>_<y>.png`: the map, one set per game client version so an old link opens
   on its own map; `tiles/index.json` lists the sets, `tiles/<version>/meta.json` the floors and tiles. Floor `s` is the
   surface; the others are slices by height. Only the coloured pictures are published.
