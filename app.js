@@ -1287,7 +1287,7 @@ async function save() {
   d.append(el("h2", {}, t("saveTitle")), el("p", {}, t("saveHelp")), pre);
   // past Discord's 2,000 characters: the file to attach in the ticket instead (the link inside it, unchanged)
   const over = url.length > LINK_MAX || message.length > LINK_MAX;
-  if (over) d.append(el("p", { class: "warn" }, t("overFile", url.length, message.length)));
+  if (over) d.append(el("p", { class: "warn" }, t("overFile", url.length.toLocaleString(lang), message.length.toLocaleString(lang))));
   else if (message.length > 1900) d.append(el("p", { class: "warn" }, t("long", message.length)));
   d.append(el("div", { class: "row" },
     el("button", { type: "button", onclick: () => copy(url, true) }, t("copyLink")),
