@@ -26,7 +26,7 @@ button.danger { color: #fff; background: var(--danger); border-color: var(--dang
 /* ---- the bar: one line */
 #bar {
   display: flex; flex-wrap: nowrap; gap: 8px; align-items: center; padding: 0 10px; height: var(--bar-h); flex: none;
-  background: var(--panel); border-bottom: 1px solid var(--line); z-index: 1000; position: relative;
+  background: var(--panel); border-bottom: 1px solid var(--line); z-index: 1300; position: relative;   /* its Go-to menu over the floors card */
 }
 #bar .brand { flex: none; width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; font-size: 17px;
               background: linear-gradient(135deg, #2b6cff, #30a46c); }
