@@ -2,6 +2,7 @@
 // Everything a link carries was typed by someone: text goes into the page with textContent only, never as HTML.
 import * as ML from "./maplink.js";
 import * as FL from "./floors.js";
+import * as GT from "./goto.js";
 import { MONSTERS } from "./monsters.js";
 import { LANGS, pickLang, translator } from "./i18n.js";
 import { parseSchedule, scheduleCode, scheduleText } from "./schedule.js";
@@ -39,14 +40,22 @@ const KIND_UI = {
   npc: { color: "#5e7d1f", svg: svg('<circle cx="8" cy="4.8" r="2.6"/><path d="M3 14.5c0-3 2.2-5.2 5-5.2s5 2.2 5 5.2"/>'),
     fields: { name: { input: "text" }, schedule: { input: "schedule" }, label: { input: "text", word: "field.npcLabel" } } },
 };
-// the map things: one menu in the bar ("Objects"), each kind with its icon, name and one line
+// the map things: on a phone one menu ("Objects", the ＋), each kind with its icon, name and one line; on a computer
+// listed in the tool rail (the two-way rope from a rope's panel)
 const THINGS = ["rope", "rope2", "lever", "hole", "door", "portal", "elevator", "npc"];
-const TOOLS = ["select", "spawn", "boss", "poi", "area", "route", "note", "things", "legend"];
+// the tool rail, top to bottom ("|" a group line); on a phone the bar at the bottom holds PHONE_TOOLS, the rest in "More"
+const RAIL = ["select", "spawn", "boss", "poi", "area", "route", "note", "|", "rope", "hole", "portal", "door", "lever", "elevator", "npc", "|", "legend"];
+const PHONE_TOOLS = ["select", "spawn", "things", "note", "more"];
+const MORE_TOOLS = ["boss", "poi", "area", "route", "legend"];
+// labels on the map: auto (on hover, the selected marker, areas, and every name from this zoom in), always, never
+// (on hover only)
+const LABEL_ZOOM = 4;
+const LINK_WARN = 1800, LINK_MAX = 2000;   // Discord's message limit: the link's size, live, warns from LINK_WARN
 // a field's word in the panel and the change list: its own (a boss's or an NPC's label) or the field's
 const fieldWord = (kind, name) => t(KIND_UI[kind]?.fields?.[name]?.word || "field." + name);
 // a two-way rope: an arrow both ways
 const arrowOf = (m) => (m.kind === "rope2" ? "↔" : "→");
-const GLYPH = { select: "☝", legend: "?", things: "＋", ...Object.fromEntries(Object.entries(KIND_UI).map(([k, v]) => [k, v.glyph])) };
+const GLYPH = { select: "☝", legend: "?", things: "＋", more: "⋯", ...Object.fromEntries(Object.entries(KIND_UI).map(([k, v]) => [k, v.glyph])) };
 const UNKNOWN = { color: "#888", glyph: "?", fields: {} };
 const ui = (m) => KIND_UI[m.kind] || UNKNOWN;
 // a kind whose marker can lead somewhere (rope, hole, portal)
@@ -94,6 +103,15 @@ let areaMode = "brush";
 let draftRoute = null;   // {floor, points}
 let destFor = null;   // the "dest" tool: the id of the rope, hole or portal whose destination the next tap sets
 let mapTitle = "";   // the map's title (the link's, else ?title=): the tab and the header show it
+let mode = "edit";   // "edit" or "review" (review: look only; what changed comes next round)
+let lastCell = null;   // {x, z, floor}: the cell under the cursor (or the last tap): the status bar copies its /pos
+let focusPane = null;   // the pane the floors card and Go to change: the last one clicked (else the first)
+// a viewer's own settings (this browser only, never in a link): the labels mode, the floors card folded
+const pref = {
+  get(k, def) { try { return localStorage.getItem("opengea.map." + k) ?? def; } catch { return def; } },
+  set(k, v) { try { localStorage.setItem("opengea.map." + k, v); } catch { /* private window: this visit only */ } },
+};
+let labelsMode = ["auto", "always", "never"].includes(pref.get("labels")) ? pref.get("labels") : "auto";
 const undoStack = [], redoStack = [];
 let panes = [];
 let syncing = false;
@@ -151,31 +169,37 @@ function buildPanes(floors, view) {
   for (const p of panes) p.map.remove();
   panes = [];
   activePane = null;
+  focusPane = null;
   const box = $("panesBox");
   box.textContent = "";
   floors.forEach((floor, i) => {
     const select = el("select", { "aria-label": t("field.floor") });
-    for (const f of tileMeta.floors) select.append(el("option", { value: f }, floorLabel(f)));
+    const counts = FL.floorCounts(markers);
+    for (const f of tileMeta.floors) select.append(el("option", { value: f }, floorOptionText(f, counts)));
     select.value = floor;
     const mapEl = el("div", { class: "map" });
     // the floor above / below (the next one with map in view), the view kept where it is
     const up = el("button", { type: "button", class: "fnav", title: t("floorUp") + " (PageUp, ])", "aria-label": t("floorUp") }, "▲");
     const down = el("button", { type: "button", class: "fnav", title: t("floorDown") + " (PageDown, [)", "aria-label": t("floorDown") }, "▼");
-    box.append(el("div", { class: "pane" }, el("div", { class: "pane-head" }, select, up, down), mapEl));
+    const head = el("div", { class: "pane-head" }, select, up, down);
+    const paneEl = el("div", { class: "pane" }, head, mapEl);
+    box.append(paneEl);
     const map = L.map(mapEl, { crs: CRS, minZoom: -2, maxZoom: 5, zoomSnap: 1, attributionControl: false,
       zoomControl: i === 0, doubleClickZoom: false, maxBounds: L.latLngBounds(tileMeta.bounds).pad(0.3), maxBoundsViscosity: 0.8 });
-    const p = { floor, map, el: mapEl, select, up, down, base: null, under: null, layer: L.layerGroup().addTo(map), draft: L.layerGroup().addTo(map) };
+    const p = { floor, map, el: mapEl, head, select, up, down, base: null, under: null, layer: L.layerGroup().addTo(map), draft: L.layerGroup().addTo(map) };
     panes.push(p);
     setFloor(p, floor);
     select.addEventListener("change", () => { setFloor(p, select.value); refresh(); });
     up.addEventListener("click", () => stepFloor(p, -1));
     down.addEventListener("click", () => stepFloor(p, 1));
     mapEl.addEventListener("pointerenter", () => { activePane = p; });
-    mapEl.addEventListener("pointerdown", () => { activePane = p; });
-    map.on("moveend", () => paintFloorNav(p));
+    paneEl.addEventListener("pointerdown", () => { activePane = p; if (focusPane !== p) { focusPane = p; paintFloorCard(); } });
+    map.on("moveend", () => { paintFloorNav(p); measureLinkSoon(); });
     map.setView(ll(view.x, view.z), view.zoom, { animate: false });
     map.on("move", () => { sync(p); drawLinksSoon(); });
     map.on("zoomend resize", drawLinksSoon);
+    // auto labels: every name from LABEL_ZOOM in, an area's when it is wide enough on screen
+    map.on("zoomend", () => { if (labelsMode === "auto") drawPane(p); });
     map.on("mousemove", (e) => showCoords(p, e.latlng));
     map.on("click", (e) => onMapClick(p, e));
     map.on("dblclick", () => { if (tool === "route") finishRoute(); });
@@ -190,9 +214,13 @@ function buildPanes(floors, view) {
     p.map.invalidateSize({ animate: false });
     p.map.setView(ll(view.x, view.z), view.zoom, { animate: false });
   }
+  paintPaneCount();
   applyTool();
   refresh();
 }
+
+// the pane the floors card and Go to act on
+const targetPane = () => (panes.includes(focusPane) ? focusPane : panes[0]);
 
 // 1 to 3 floors side by side: the panes kept keep their floors; a new one opens on the next floor down that has
 // markers (floors.js paneFloor), else the next floor down with map in view, never the top of the world
@@ -258,7 +286,7 @@ function paintFloorNav(p) {
 
 // the bottom bar names the floor the pane now shows (the cursor may not have moved)
 function showCoordsFloor(p) {
-  $("coords").textContent = $("coords").textContent.replace(/[^·]*$/, " " + floorLabel(p.floor));
+  if (lastCell) showCell(lastCell.x, lastCell.z, p.floor);
 }
 
 function sync(src) {
@@ -280,7 +308,13 @@ function posLine(x, z, floor) {
 
 function showCoords(p, latlng) {
   const [x, z] = cellOf(latlng);
-  $("coords").textContent = `x ${x} · z ${z} · ${floorLabel(p.floor)}`;
+  showCell(x, z, p.floor);
+}
+// the status bar's cell (a click on it copies its /pos line)
+function showCell(x, z, floor) {
+  lastCell = { x, z, floor };
+  $("cur").textContent = `x ${x} · z ${z} · ${floorShort(floor)}`;
+  $("cur").disabled = false;
 }
 
 // ------------------------------------------------------------------------------------------------ drawing
@@ -288,6 +322,19 @@ function tip(layer, text, opts = {}) {
   if (!text) return;
   const span = text instanceof Node ? text : el("span", {}, text);   // text nodes: whatever the link holds stays text
   layer.bindTooltip(span, { permanent: true, direction: "top", className: "lbl", offset: [0, -14], ...opts });
+}
+
+// a marker's name on the map all the time, or on hover only (the labels mode: auto, always, never)
+function labelShown(p, m) {
+  if (labelsMode === "always") return true;
+  if (labelsMode === "never") return false;
+  return m.id === selected || p.map.getZoom() >= LABEL_ZOOM || (!!m.cells && areaWide(p, m));
+}
+// an area wide enough on screen to carry its name (auto labels: a big zone named, a small entrance on hover)
+function areaWide(p, m) {
+  let x0 = Infinity, x1 = -Infinity;
+  for (const [x] of m.cells) { if (x < x0) x0 = x; if (x > x1) x1 = x; }
+  return (x1 - x0 + 1) * 2 ** p.map.getZoom() >= 120;
 }
 
 function labelOf(m) {
@@ -314,7 +361,12 @@ function icon(m) {
   const cls = "mk" + (BIG[m.kind] ? " " + m.kind : "") + (m.id === selected ? " sel" : "") + (m.locked ? " lock" : "");
   // static glyphs only: no text from the link in this HTML
   return L.divIcon({ className: "", iconSize: [size, size], iconAnchor: [size / 2, size / 2],
-    html: `<div class="${cls}" style="background:${k.color};--ring:${k.color}">${m.locked ? "🔒" : k.svg || k.glyph}${m.fields?.combat ? '<span class="badge cb">⚔</span>' : ""}</div>` });
+    html: `<div class="${cls}" style="background:${k.color};--ring:${k.color}">${m.locked ? "🔒" : k.svg || k.glyph}${m.fields?.combat ? '<span class="badge cb">⚔</span>' : ""}${countBadge(m)}</div>` });
+}
+// a spawn of more than one monster: ×N on its corner (a number only: nothing typed goes into this HTML)
+function countBadge(m) {
+  const n = m.kind === "spawn" ? Math.round(+m.fields?.count) : 0;
+  return n > 1 && n < 1000 ? `<span class="badge n">×${n}</span>` : "";
 }
 
 function rings(cells) {
@@ -333,7 +385,7 @@ function outline(cells) {
   return segs;
 }
 
-const canEdit = (m) => m && !m.locked && m.kind in KIND_UI;
+const canEdit = (m) => m && mode === "edit" && !m.locked && m.kind in KIND_UI;
 
 // ---- where ropes, holes and portals lead
 // Same floor: a dashed arrow on that floor's panes. Another floor: "leads to floor N" on the marker's label, a small end
@@ -478,8 +530,9 @@ function drawMarker(p, m) {
     });
     const label = labelOf(m), away = m.dest && m.dest.floor !== m.floor ? leadsText(m.dest.floor) : "";
     const text = [label, away, m.fields?.combat ? "⚔ " + t("combatOn") : ""].filter(Boolean).join(" · ");
-    if (m.kind === "boss" || m.kind === "npc") tip(mk, whoWhen(m), BIG[m.kind] ? { offset: [0, -18] } : {});
-    else tip(mk, m.kind === "rope2" ? ("↔ " + text).trim() : text);   // a two-way rope: ↔ always
+    const permanent = labelShown(p, m);
+    if (m.kind === "boss" || m.kind === "npc") tip(mk, whoWhen(m), { permanent, ...(BIG[m.kind] ? { offset: [0, -18] } : {}) });
+    else tip(mk, m.kind === "rope2" ? ("↔ " + text).trim() : text, { permanent });   // a two-way rope: ↔ always
     mk.addTo(p.layer);
     return;
   }
@@ -488,10 +541,10 @@ function drawMarker(p, m) {
     const poly = L.polygon(rings(m.cells), style).on("click", pick).addTo(p.layer);
     L.polyline(outline(m.cells), { color: sel ? "#ffe066" : k.color, weight: sel ? 3 : 2, dashArray: m.locked ? "4 4" : null, interactive: false }).addTo(p.layer);
     const c = ML.where(m);
-    if (c && labelOf(m)) {
+    if (c && labelOf(m) && labelShown(p, m)) {
       const anchor = L.marker(ll(c[0], c[1]), { icon: L.divIcon({ className: "", iconSize: [0, 0] }), interactive: false }).addTo(p.layer);
       tip(anchor, (m.locked ? "🔒 " : "") + labelOf(m), { offset: [0, 0], direction: "center" });
-    }
+    } else if (labelOf(m)) tip(poly, (m.locked ? "🔒 " : "") + labelOf(m), { permanent: false, sticky: true, offset: [0, -10] });
     if (sel && canEdit(m)) moveHandle(p, m);
     return poly;
   }
@@ -501,7 +554,7 @@ function drawMarker(p, m) {
     const [x1, z1] = m.points[m.points.length - 1];
     L.circleMarker(ll(m.points[0][0], m.points[0][1]), { radius: 5, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
     L.circleMarker(ll(x1, z1), { radius: 7, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
-    if (labelOf(m)) tip(line, (m.locked ? "🔒 " : "") + labelOf(m), { direction: "center", offset: [0, 0] });
+    if (labelOf(m)) tip(line, (m.locked ? "🔒 " : "") + labelOf(m), { direction: "center", offset: [0, 0], permanent: labelShown(p, m), sticky: !labelShown(p, m) });
     if (sel && canEdit(m)) {
       m.points.forEach(([x, z], i) => {
         const h = L.marker(ll(x, z), { draggable: true, icon: L.divIcon({ className: "", html: '<div class="handle"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }) });
@@ -565,9 +618,12 @@ function refresh() {
   for (const p of panes) drawPane(p);
   drawLinksSoon();
   paintFloorSelects();
-  $("undo").disabled = !undoStack.length;
-  $("redo").disabled = !redoStack.length;
+  paintFloorCard();
+  paintCount();
+  for (const id of ["undo", "undoM"]) if ($(id)) $(id).disabled = !undoStack.length || mode !== "edit";
+  for (const id of ["redo", "redoM"]) if ($(id)) $(id).disabled = !redoStack.length || mode !== "edit";
   renderPanel();
+  measureLinkSoon();
 }
 
 // ------------------------------------------------------------------------------------------------ tools
@@ -579,10 +635,17 @@ function applyTool() {
 // the bar, the sub-bar and the maps' cursor for the tool (no redraw of the markers)
 function paintTools() {
   const thing = activeThing();
-  for (const b of $("tools").children) b.classList.toggle("on", b.dataset.tool === (thing ? "things" : tool === "dest" ? byId(destFor)?.kind : tool));
-  // the menu's button wears the chosen thing's marker while it is in use
-  const tb = document.querySelector("[data-tool=things]");
-  if (tb) tb.firstChild.replaceWith(thing ? dotNode(thing, "glyph mk mini") : glyphNode("things"));
+  const now = tool === "dest" ? byId(destFor)?.kind : tool;
+  // the rail: the tool in use (a rope's destination being picked: the rope; a two-way rope: the rope's button)
+  for (const b of document.querySelectorAll("[data-tool]")) {
+    const on = b.dataset.tool === now || (now === "rope2" && b.dataset.tool === "rope")
+      || (b.dataset.tool === "things" && !!thing) || (b.dataset.tool === "more" && MORE_TOOLS.includes(now));
+    b.classList.toggle("on", on);
+    if (b.closest("#tools")) b.setAttribute("aria-pressed", String(on));
+  }
+  // the phone's Objects button wears the chosen thing's marker while it is in use
+  const tb = document.querySelector("#tools [data-tool=things]");
+  if (tb) tb.firstChild.replaceWith(thing ? dotNode(thing, "glyph mk mini") : glyphNode("things", "glyph mk mini plain"));
   for (const p of panes) {
     const paint = tool === "area";
     p.el.classList.toggle("painting", paint);
@@ -606,10 +669,15 @@ function paintTools() {
     sub.append(el("span", { class: "pick" }, dotNode(m?.kind), " " + t("pickDest")));
     sub.append(el("button", { type: "button", onclick: endDestPick }, m?.dest ? t("cancel") : t("skip")));
   }
+  sub.hidden = !sub.childNodes.length;
 }
 
 function setTool(name) {
+  closeMenus();
   if (name === "legend") { showLegend(); return; }
+  if (name === "things") { toggleThings(); return; }
+  if (name === "more") { toggleMenu("moreMenu"); return; }
+  if (mode !== "edit" && name !== "select") { toast(t("reviewNoEdit")); return; }
   if (tool === "route" && name !== "route") finishRoute();
   destFor = null;
   tool = name;
@@ -622,41 +690,65 @@ function setTool(name) {
   else if (name !== "select") toast(`${t("kind." + name)}: ${t("hintPlace")}`);
 }
 
-// ---- the map things' menu: rope, lever, hole, door, portal, elevator (icon, name, one line each)
-function buildThingsMenu() {
-  const menu = el("div", { id: "thingsMenu", role: "menu", hidden: true });
-  for (const kind of THINGS) {
-    menu.append(el("button", { type: "button", role: "menuitem", "data-kind": kind, onclick: () => { closeThings(); setTool(kind); } },
-      dotNode(kind, "mk"), el("div", {}, el("b", {}, t("kind." + kind)), el("span", {}, t("help." + kind)))));
+// ---- the phone's menus: the map things (rope .. NPC: icon, name, one line each) and "More" (the other tools, labels,
+// floors side by side, review, redo, language, open a file)
+const menuRow = (kind, word, help, onclick, attrs = {}) => el("button", { type: "button", role: "menuitem", onclick, ...attrs },
+  dotNode(kind, "mk"), el("div", {}, el("b", {}, word), help ? el("span", {}, help) : null));
+
+function buildMenus() {
+  const things = el("div", { id: "thingsMenu", class: "menu", role: "menu", hidden: true });
+  for (const kind of THINGS) things.append(menuRow(kind, t("kind." + kind), t("help." + kind), () => { closeMenus(); setTool(kind); }, { "data-kind": kind }));
+  const more = el("div", { id: "moreMenu", class: "menu", role: "menu", hidden: true });
+  for (const name of MORE_TOOLS) {
+    const word = name === "legend" ? t("legend") : t("tool." + name);
+    more.append(menuRow(name, word, name === "legend" ? t("legendTitle") : t("help." + name), () => { closeMenus(); setTool(name); }, { "data-tool": name }));
   }
-  document.body.append(menu);
-  // a tap anywhere else closes it
+  more.append(el("div", { class: "menu-sets" },
+    el("div", { class: "set" }, el("span", {}, t("labels")), labelsSeg()),
+    el("div", { class: "set" }, el("span", {}, t("sideBySide")), panesSeg()),
+    el("div", { class: "set" }, el("span", {}, t("modeWord")), modeSeg()),
+    el("div", { class: "set" },
+      el("button", { type: "button", id: "redoM", onclick: () => { closeMenus(); redo(); } }, "↷ " + t("redo")),
+      el("button", { type: "button", onclick: () => { closeMenus(); openFile(); } }, "📂 " + t("openFile"))),
+    el("div", { class: "set" }, el("span", {}, t("lang")), langSelect())));
+  document.body.append(things, more);
+  // a tap anywhere else closes them
   document.addEventListener("pointerdown", (e) => {
-    if (!menu.hidden && !e.target.closest("#thingsMenu, [data-tool=things]")) closeThings();
+    if (!e.target.closest(".menu, [data-tool=things], [data-tool=more]")) closeMenus();
   }, true);
-  window.addEventListener("resize", closeThings);
+  window.addEventListener("resize", closeMenus);
 }
 
 function toggleThings() {
-  const menu = $("thingsMenu"), btn = document.querySelector("[data-tool=things]");
-  if (!menu.hidden) { closeThings(); return; }
-  menu.hidden = false;
-  // under its button, inside the screen (a phone: the whole width less a margin)
-  const r = btn.getBoundingClientRect(), w = Math.min(320, innerWidth - 16);
-  menu.style.width = w + "px";
-  menu.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + "px";
-  menu.style.top = r.bottom + 4 + "px";
-  btn.setAttribute("aria-expanded", "true");
-  for (const b of menu.children) b.classList.toggle("on", b.dataset.kind === activeThing());
-  (menu.querySelector(".on") || menu.firstChild).focus();
+  toggleMenu("thingsMenu");
+  for (const b of $("thingsMenu").children) b.classList.toggle("on", b.dataset.kind === activeThing());
 }
 
-function closeThings() {
-  const menu = $("thingsMenu");
-  if (!menu || menu.hidden) return false;
-  menu.hidden = true;
-  document.querySelector("[data-tool=things]")?.setAttribute("aria-expanded", "false");
-  return true;
+// a menu by its button: under it, or over it when the button is low on the screen (the phone's bottom bar); inside
+// the screen (a phone: the whole width less a margin)
+function toggleMenu(id) {
+  const menu = $(id), btn = document.querySelector(`#tools [data-tool=${id === "moreMenu" ? "more" : "things"}]`);
+  if (!menu.hidden) { closeMenus(); return; }
+  closeMenus();
+  menu.hidden = false;
+  const r = btn.getBoundingClientRect(), w = Math.min(340, innerWidth - 16);
+  menu.style.width = w + "px";
+  menu.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + "px";
+  if (r.top > innerHeight / 2) { menu.style.top = ""; menu.style.bottom = innerHeight - r.top + 6 + "px"; }
+  else { menu.style.bottom = ""; menu.style.top = r.bottom + 4 + "px"; }
+  menu.style.maxHeight = (r.top > innerHeight / 2 ? r.top - 16 : innerHeight - r.bottom - 16) + "px";
+  btn.setAttribute("aria-expanded", "true");
+  (menu.querySelector(".on") || menu.querySelector("button")).focus();
+}
+
+function closeMenus() {
+  let was = false;
+  for (const id of ["thingsMenu", "moreMenu"]) {
+    const menu = $(id);
+    if (menu && !menu.hidden) { menu.hidden = true; was = true; }
+  }
+  for (const b of document.querySelectorAll("#tools [aria-expanded=true]")) b.setAttribute("aria-expanded", "false");
+  return was;
 }
 
 // the map thing being placed (or whose destination is being picked), else null
@@ -689,6 +781,7 @@ function onMapClick(p, e) {
   if (tool === "select") {
     selected = null;
     refresh();
+    showCell(x, z, p.floor);
     copy(posLine(x, z, p.floor));
     return;
   }
@@ -829,57 +922,145 @@ function renderPanel() {
   panel.hidden = false;
   panel.textContent = "";
   const k = ui(m), editable = canEdit(m);
-  panel.append(el("h3", {}, dotNode(m.kind in KIND_UI ? m.kind : "?", "mk head"), KIND_UI[m.kind] ? t("kind." + m.kind) : m.kind, el("span", { class: "id" }, "#" + m.id)));
-  if (!(m.kind in KIND_UI)) panel.append(el("div", { class: "note" }, t("unknownKind")));
-  else if (m.locked) panel.append(el("div", { class: "note" }, "🔒 " + t("locked")));
+  // the head: what it is, its number, close; under it where it is and its /pos
+  panel.append(el("div", { class: "hd" }, dotNode(m.kind in KIND_UI ? m.kind : "?", "mk head"),
+    el("h3", {}, KIND_UI[m.kind] ? t("kind." + m.kind) : m.kind), el("span", { class: "id" }, "#" + m.id),
+    el("button", { type: "button", class: "x", "data-act": "close", title: t("close") + " (Esc)", "aria-label": t("close"), onclick: () => select(null) }, "✕")));
   const where = ML.where(m);
-  if (where) panel.append(el("div", { class: "id" }, `x ${where[0]} · z ${where[1]}` + (m.cells ? " · " + t("cells", m.cells.length) : m.points ? " · " + t("points", m.points.length) : "")));
-  // floor
-  panel.append(el("label", {}, t("field.floor")));
-  const fs = el("select", { disabled: !editable });
-  const counts = FL.floorCounts(markers);
-  for (const f of tileMeta.floors) fs.append(el("option", { value: f }, floorOptionText(f, counts)));
-  fs.value = m.floor;
-  fs.addEventListener("change", () => commit(() => { byId(m.id).floor = fs.value; }));
-  panel.append(fs);
+  if (where) {
+    panel.append(el("div", { class: "sub" },
+      el("span", {}, `${floorShort(m.floor)} · x ${where[0]}, z ${where[1]}` + (m.cells ? " · " + t("cells", m.cells.length) : m.points ? " · " + t("points", m.points.length) : "")),
+      el("button", { type: "button", class: "chip", onclick: () => copy(posLine(where[0], where[1], m.floor)) }, t("copyPos"))));
+  }
+  const body = el("div", { class: "body" });
+  panel.append(body);
+  if (!(m.kind in KIND_UI)) body.append(el("div", { class: "note" }, t("unknownKind")));
+  else if (m.locked) body.append(el("div", { class: "note" }, "🔒 " + t("locked")));
+  else if (mode !== "edit") body.append(el("div", { class: "note" }, t("reviewNoEdit")));
   // a rope made two-way (goes and comes back) and back: the same marker, its kind swapped
   if (m.kind === "rope" || m.kind === "rope2") {
     const two = el("input", { type: "checkbox", disabled: !editable });
     two.checked = m.kind === "rope2";
     two.addEventListener("change", () => commit(() => { byId(m.id).kind = two.checked ? "rope2" : "rope"; }));
-    panel.append(el("label", { class: "check" }, two, t("field.twoWay")));
+    body.append(el("label", { class: "check" }, two, t("field.twoWay")));
   }
-  if (leads(m.kind)) destSection(panel, m, editable);
-  for (const [name, f] of Object.entries(k.fields)) {
-    panel.append(el("label", {}, fieldWord(m.kind, name)));
-    if (f.input === "schedule") { schedulePicker(panel, m, editable); continue; }
-    if (f.input === "check") { panel.lastChild.remove(); checkField(panel, m, name, editable); continue; }
-    if (f.input === "boss") { bossInput(panel, m, editable); continue; }
+  if (leads(m.kind)) destSection(body, m, editable);
+  if (m.kind === "spawn") spawnFields(body, m, editable);
+  else for (const [name, f] of Object.entries(k.fields)) {
+    body.append(el("label", {}, fieldWord(m.kind, name)));
+    if (f.input === "schedule") { schedulePicker(body, m, editable); continue; }
+    if (f.input === "check") { body.lastChild.remove(); checkField(body, m, name, editable); continue; }
+    if (f.input === "boss") { bossInput(body, m, editable); continue; }
     const v = m.fields?.[name] ?? "";
     let input;
     if (f.input === "longtext") input = el("textarea", { maxlength: ML.MAX_TEXT, disabled: !editable });
-    else if (f.input === "int") input = el("input", { type: "number", min: f.min, max: f.max, step: 1, inputmode: "numeric", disabled: !editable });
-    else input = el("input", { type: "text", maxlength: f.input === "monster" ? 60 : 120, disabled: !editable, list: f.input === "monster" ? "monsterList" : null, autocomplete: "off" });
+    else input = el("input", { type: "text", maxlength: 120, disabled: !editable, autocomplete: "off" });
     input.value = v;
-    input.addEventListener("change", () => commit(() => {
-      const n = byId(m.id);
-      let val = input.value.trim();
-      if (f.input === "int") val = val === "" ? null : Math.max(f.min, Math.min(f.max, Math.round(+val) || 0));
-      if (f.input === "monster") val = MONSTERS.find((x) => x.toLowerCase() === val.toLowerCase()) || val;
-      if ((n.fields[name] ?? null) === (val === "" ? null : val)) return false;
-      if (val === "" || val == null) delete n.fields[name]; else n.fields[name] = val;
-    }));
-    panel.append(input);
+    input.addEventListener("change", () => setField(m.id, name, input.value.trim()));
+    body.append(input);
   }
+  // its floor (each with its markers' count)
+  body.append(el("label", {}, t("field.floor")));
+  const fs = el("select", { disabled: !editable });
+  const counts = FL.floorCounts(markers);
+  for (const f of tileMeta.floors) fs.append(el("option", { value: f }, floorOptionText(f, counts)));
+  fs.value = m.floor;
+  fs.addEventListener("change", () => commit(() => { byId(m.id).floor = fs.value; }));
+  body.append(fs);
   if (STAFF) {
-    const box = el("input", { type: "checkbox" });
+    const box = el("input", { type: "checkbox", disabled: mode !== "edit" });
     box.checked = !!m.locked;
     box.addEventListener("change", () => commit(() => { byId(m.id).locked = box.checked; }));
-    panel.append(el("label", { class: "check" }, box, t("lock")));
+    body.append(el("label", { class: "check" }, box, t("lock")));
   }
-  panel.append(el("div", { class: "row" },
-    el("button", { type: "button", class: "danger", disabled: !editable && !(STAFF && m.kind in KIND_UI), onclick: deleteSelected }, t("del")),
-    el("button", { type: "button", "data-act": "close", onclick: () => select(null) }, t("close"))));
+  panel.append(el("div", { class: "ft" },
+    el("button", { type: "button", class: "danger", "data-act": "delete", disabled: mode !== "edit" || (!editable && !(STAFF && m.kind in KIND_UI)), onclick: deleteSelected }, t("del"))));
+}
+
+// one field of a marker: a value, or none ("" / null: the field goes); a changed value is one undo step
+function setField(id, name, val) {
+  commit(() => {
+    const n = byId(id);
+    if (!canEdit(n) || (n.fields[name] ?? null) === (val === "" ? null : val)) return false;
+    if (val === "" || val == null) delete n.fields[name]; else n.fields[name] = val;
+  });
+}
+
+// ---- a spawn: which monster (typed, or one already on this map as a chip), how many (− / +), how far they roam
+// (buttons, the circle on the map live), the sentence of what that means, and how many of that monster the map holds
+const RADII = [0, 1, 2, 3, 5, 8, 12];
+const clampInt = (v, f) => Math.max(f.min, Math.min(f.max, Math.round(+v) || 0));
+
+// the spawns' monsters on this map: [[name, {n: monsters, floors: {floor: monsters}}]], the most first
+function speciesOnMap() {
+  const by = new Map();
+  for (const m of markers) {
+    if (m.kind !== "spawn" || !m.fields?.monster) continue;
+    const s = by.get(m.fields.monster) || { n: 0, floors: {} };
+    const c = Math.max(1, Math.round(+m.fields.count) || 1);
+    s.n += c;
+    s.floors[m.floor] = (s.floors[m.floor] || 0) + c;
+    by.set(m.fields.monster, s);
+  }
+  return [...by].sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0]));
+}
+
+function spawnFields(body, m, editable) {
+  const F = KIND_UI.spawn.fields, f = m.fields || {};
+  const monster = f.monster ?? "", count = f.count ?? null, radius = f.radius ?? null;
+  const fl = (word, hint) => el("div", { class: "fl" }, el("span", {}, word), hint ? el("span", { class: "hint" }, hint) : null);
+  // the monster: typed (the game's names as suggestions, any other name kept as typed), or a chip
+  body.append(fl(t("field.monster"), editable ? t("typeOrPick") : null));
+  const input = el("input", { type: "text", maxlength: 60, disabled: !editable, list: "monsterList", autocomplete: "off", placeholder: t("monsterPlaceholder") });
+  input.value = monster;
+  input.addEventListener("change", () => {
+    const typed = input.value.trim();
+    setField(m.id, "monster", MONSTERS.find((x) => x.toLowerCase() === typed.toLowerCase()) || typed);
+  });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") input.blur(); });
+  body.append(input);
+  const species = speciesOnMap().slice(0, 8);
+  if (editable && species.length && !(species.length === 1 && species[0][0] === monster)) {
+    body.append(fl(t("usedHere")));
+    body.append(el("div", { class: "chips" }, species.map(([name, s]) =>
+      el("button", { type: "button", class: "chip" + (name === monster ? " on" : ""), "aria-pressed": String(name === monster),
+        onclick: () => { input.value = name; setField(m.id, "monster", name); } }, name, el("i", {}, String(s.n))))));
+  }
+  // how many: − [n] +
+  const n = el("input", { type: "number", min: F.count.min, max: F.count.max, step: 1, inputmode: "numeric", disabled: !editable, "aria-label": t("field.count") });
+  n.value = count ?? "";
+  n.addEventListener("change", () => setField(m.id, "count", n.value.trim() === "" ? null : clampInt(n.value, F.count)));
+  const step = (d) => setField(m.id, "count", clampInt((+count || 1) + d, F.count));
+  body.append(fl(t("field.count")), el("div", { class: "stepper" },
+    el("button", { type: "button", "data-act": "less", disabled: !editable || (+count || 1) <= F.count.min, "aria-label": "−1", onclick: () => step(-1) }, "−"),
+    n,
+    el("button", { type: "button", "data-act": "more", disabled: !editable || (+count || 1) >= F.count.max, "aria-label": "+1", onclick: () => step(1) }, "+")));
+  // how far: the usual radii as buttons (a link's other value shows as its own button), and any other in the box
+  const radii = RADII.includes(+radius) || radius == null ? RADII : [...RADII, +radius].sort((a, b) => a - b);
+  const seg = el("div", { class: "seg radius", role: "group", "aria-label": t("field.radius") }, radii.map((r) =>
+    el("button", { type: "button", class: +radius === r && radius != null ? "on" : "", "aria-pressed": String(+radius === r && radius != null), disabled: !editable,
+      onclick: () => setField(m.id, "radius", r) }, String(r))));
+  const other = el("input", { type: "number", min: F.radius.min, max: F.radius.max, step: 1, inputmode: "numeric", disabled: !editable, class: "other", "aria-label": t("radiusOther"), title: t("radiusOther") });
+  other.value = radius != null && !radii.includes(+radius) ? radius : "";
+  other.addEventListener("change", () => setField(m.id, "radius", other.value.trim() === "" ? null : clampInt(other.value, F.radius)));
+  other.placeholder = t("radiusOtherShort");
+  body.append(fl(t("radiusWord"), t("cellsWord")), el("div", { class: "radius-row" }, seg, other));
+  // what it means, in words
+  body.append(el("div", { class: "preview" }, spawnSentence(monster, +count || 1, radius)));
+  // the same monster on the whole map
+  const mine = monster && speciesOnMap().find(([name]) => name === monster);
+  if (mine) {
+    const floors = Object.entries(mine[1].floors).sort((a, b) => FL.level(b[0]) - FL.level(a[0]));
+    const per = floors.length > 1 ? " · " + floors.map(([fl2, c]) => `${floorShort(fl2)}: ${c}`).join(" · ") : "";
+    body.append(el("div", { class: "preview total" }, t(floors.length > 1 ? "onMapN" : "onMap1", mine[1].n, monster, floors.length) + per));
+  }
+}
+
+function spawnSentence(monster, count, radius) {
+  if (!monster) return t("spawnSayNone");
+  const who = `${count} × ${monster}`;
+  if (radius == null) return t("spawnSayNoR", who);
+  return t(+radius === 0 ? "spawnSay0" : +radius === 1 ? "spawnSay1" : "spawnSay", who, radius);
 }
 
 // a yes/no field (a teleport-like object's combat lock): a checkbox, 1 when ticked, no field when not
@@ -1006,7 +1187,7 @@ function showDest(d) {
 
 function deleteSelected() {
   const m = byId(selected);
-  if (!m || (m.locked && !STAFF)) return;
+  if (!m || mode !== "edit" || (m.locked && !STAFF)) return;
   commit(() => { markers = markers.filter((x) => x.id !== m.id); selected = null; });
 }
 
@@ -1087,12 +1268,47 @@ async function save() {
   d.textContent = "";
   const pre = el("pre", {}, message);
   d.append(el("h2", {}, t("saveTitle")), el("p", {}, t("saveHelp")), pre);
-  if (message.length > 1900) d.append(el("p", { class: "warn" }, t("long", message.length)));
+  // past Discord's 2,000 characters: the file to attach in the ticket instead (the link inside it, unchanged)
+  const over = url.length > LINK_MAX || message.length > LINK_MAX;
+  if (over) d.append(el("p", { class: "warn" }, t("overFile", url.length, message.length)));
+  else if (message.length > 1900) d.append(el("p", { class: "warn" }, t("long", message.length)));
   d.append(el("div", { class: "row" },
     el("button", { type: "button", onclick: () => copy(url, true) }, t("copyLink")),
-    el("button", { type: "button", class: "primary", onclick: () => copy(message, true) }, t("copyAll")),
+    el("button", { type: "button", class: over ? "" : "primary", onclick: () => copy(message, true) }, t("copyAll")),
+    el("button", { type: "button", class: over ? "primary" : "", "data-act": "download", onclick: () => download(message) }, "⬇ " + t("downloadFile")),
     el("button", { type: "button", onclick: () => d.close() }, t("close"))));
   d.showModal();
+}
+
+// ---- a map as a file: Share downloads the message (the change list and the link) as a .txt to attach on Discord;
+// "Open a file" (or a file dropped on the page) opens the link inside it. The link is the same bytes either way.
+function download(text) {
+  const name = (ML.cleanTitle(mapTitle) || t("fileName")).replace(/[\\/:*?"<>|#%\u0000-\u001f]+/g, " ").trim().slice(0, 60) || "map";
+  const a = el("a", { href: URL.createObjectURL(new Blob([text + "\n"], { type: "text/plain;charset=utf-8" })), download: name + ".txt" });
+  document.body.append(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  toast(t("downloaded", name + ".txt"));
+}
+
+// the first map link in a text (a whole URL, or a bare "#2...." fragment): its fragment, else null
+function linkIn(text) {
+  const m = String(text).match(/#([12]\.[A-Za-z0-9_-]{8,})/);
+  return m ? m[1] : null;
+}
+
+function openLinkFrag(frag) {
+  if ("#" + frag === location.hash) { location.reload(); return; }
+  location.hash = frag;   // hashchange: the page reloads on it
+}
+
+function openFile() { $("fileIn").click(); }
+
+async function readFile(file) {
+  if (!file) return;
+  if (file.size > 2_000_000) { toast(t("fileNoLink", file.name)); return; }
+  const frag = linkIn(await file.text());
+  if (frag) openLinkFrag(frag); else toast(t("fileNoLink", file.name));
 }
 
 function showChanges(lines) {
@@ -1126,35 +1342,332 @@ function banner(text, cls, button) {
 }
 
 // ------------------------------------------------------------------------------------------------ start
-function buildBar() {
-  const tools = $("tools");
-  for (const name of TOOLS) {
-    const word = name === "legend" ? t("legend") : t("tool." + name);
-    const attrs = { type: "button", class: "tool" + (name === "legend" ? " icon" : ""), "data-tool": name, title: word,
-      "aria-label": word, onclick: () => setTool(name) };
-    if (name === "things") {   // the map things' menu: its button shows the chosen one's marker
-      Object.assign(attrs, { title: t("thingsTitle"), "aria-haspopup": "menu", "aria-expanded": "false", onclick: toggleThings });
-      tools.append(el("button", attrs, glyphNode("things"), el("span", { class: "txt" }, " " + word), el("span", { class: "caret" }, "▾")));
-      continue;
-    }
-    tools.append(el("button", attrs, glyphNode(name), el("span", { class: "txt" }, " " + word)));
+// The page's frame, made here and not in index.html (a cached older index.html with this script still works):
+// the bar (title, Go to, Edit / Review, undo, redo, language, open a file, Share), the tool rail, the maps with the
+// floors card, the labels switch and the tool's sub-bar over them, the docked panel, the status bar.
+function buildFrame() {
+  const iconBtn = (id, glyph, word, onclick) => el("button", { type: "button", id, class: "icon", title: word, "aria-label": word, onclick }, glyph);
+  const bar = el("header", { id: "bar" },
+    el("div", { class: "brand", "aria-hidden": "true" }, "🗺"),
+    el("input", { id: "mapTitle", type: "text", autocomplete: "off", spellcheck: "false" }),
+    gotoBox(),
+    el("div", { class: "bar-right" },
+      modeSeg(),
+      iconBtn("undo", "↶", t("undo") + " (Ctrl+Z)", undo),
+      iconBtn("redo", "↷", t("redo") + " (Ctrl+Y)", redo),
+      langSelect("lang"),
+      iconBtn("openFile", "📂", t("openFileHelp"), openFile),
+      el("button", { type: "button", id: "save", class: "primary", title: t("shareHelp"), onclick: save }, t("share"))));
+  const rail = el("nav", { id: "tools", role: "toolbar", "aria-label": t("toolsWord"), "aria-orientation": "vertical" });
+  // one list in the order both read (keys, screen readers): the phone's Objects after Spawn, More last
+  const order = RAIL.filter((n) => n !== "|");
+  order.splice(order.indexOf("spawn") + 1, 0, "things");
+  for (const name of [...order, "more"]) rail.append(toolButton(name));
+  // the group lines: before the objects and before the legend (computer only)
+  rail.querySelector("[data-tool=rope]").before(el("div", { class: "grp desk" }, t("tool.things")));
+  rail.querySelector("[data-tool=legend]").before(el("div", { class: "sep desk" }));
+  const mapArea = el("div", { id: "mapArea" },
+    el("main", { id: "panesBox" }),
+    el("div", { id: "subtools", hidden: true }),
+    el("div", { id: "floorCard", role: "region", "aria-label": t("floorsWord") }),
+    el("div", { id: "labelsCtl", class: "float" }, el("span", {}, t("labels") + ":"), labelsSeg()));
+  const status = el("footer", { id: "coords" },
+    el("button", { type: "button", id: "cur", disabled: true, title: t("statusCopy"), onclick: () => lastCell && copy(posLine(lastCell.x, lastCell.z, lastCell.floor)) }, "x · z"),
+    el("span", { class: "hint" }, t("statusCopy")),
+    el("span", { id: "count" }),
+    el("span", { id: "meter", role: "status", title: t("meterHelp") }, el("span", { class: "txt" }), el("span", { class: "bar" }, el("i"))));
+  const file = el("input", { id: "fileIn", type: "file", accept: ".txt,.md,.json,text/plain", hidden: true });
+  file.addEventListener("change", () => { readFile(file.files[0]); file.value = ""; });
+  document.body.replaceChildren(bar, el("div", { id: "banner", hidden: true }),
+    el("div", { id: "work" }, rail, mapArea, el("aside", { id: "panel", hidden: true, "aria-label": t("panelWord") })),
+    status, el("div", { id: "toast", hidden: true, role: "status", "aria-live": "polite" }),
+    el("dialog", { id: "dialog" }), el("datalist", { id: "monsterList" }), file);
+  buildMenus();
+  // a map file dropped anywhere on the page opens it
+  addEventListener("dragover", (e) => { if ([...(e.dataTransfer?.types || [])].includes("Files")) e.preventDefault(); });
+  addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) { e.preventDefault(); readFile(e.dataTransfer.files[0]); } });
+  // the panel docks beside the maps: when it opens or closes (or the window changes) the maps measure again, keep
+  // their centre, and the selected marker stays in view
+  new ResizeObserver(() => {
+    for (const p of panes) p.map.invalidateSize({ animate: false, pan: true });
+    const m = byId(selected), w = m && ML.where(m);
+    const p = w && panes.find((q) => q.floor === m.floor);
+    if (p && !p.map.getBounds().pad(-0.08).contains(ll(w[0], w[1]))) p.map.panInside(ll(w[0], w[1]), { padding: [40, 40], animate: false });
+    drawLinksSoon();
+  }).observe($("panesBox"));
+}
+
+// a tool's button: the rail on a computer (icon and a short word), the bottom bar on a phone
+function toolButton(name) {
+  const word = name === "legend" ? t("legend") : name === "more" ? t("more") : t("tool." + name);
+  const phone = PHONE_TOOLS.includes(name), desk = name !== "things" && name !== "more";
+  const cls = "tool" + (phone ? " phone" : "") + (desk ? " desk" : "");
+  const attrs = { type: "button", class: cls, "data-tool": name, title: name === "things" ? t("thingsTitle") : word + (KIND_UI[name] ? ": " + t("help." + name) : ""),
+    "aria-label": word, onclick: () => setTool(name) };
+  if (name === "things" || name === "more") Object.assign(attrs, { "aria-haspopup": "menu", "aria-expanded": "false" });
+  const icon = KIND_UI[name] ? dotNode(name, "glyph mk mini") : glyphNode(name, "glyph mk mini plain");
+  return el("button", attrs, icon, el("span", { class: "txt" }, t("short." + name) !== "short." + name ? t("short." + name) : word));
+}
+
+// segmented controls (the bar, the floors card, the phone's More menu: each copy painted together)
+function segOf(attr, items, now, onpick, label) {
+  return el("div", { class: "seg", role: "group", "aria-label": label }, items.map(([v, word, title]) =>
+    el("button", { type: "button", [attr]: v, class: String(now) === String(v) ? "on" : "", "aria-pressed": String(String(now) === String(v)), title: title || word,
+      onclick: () => onpick(v) }, word)));
+}
+function paintSeg(attr, now) {
+  for (const b of document.querySelectorAll(`[${attr}]`)) {
+    const on = b.getAttribute(attr) === String(now);
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", String(on));
   }
-  buildThingsMenu();
-  const label = (id, glyph, word) => {
-    $(id).append(el("span", { class: "glyph" }, glyph), el("span", { class: "txt" }, " " + word));
-    $(id).title = word;
+}
+const modeSeg = () => segOf("data-mode", [["edit", t("edit")], ["review", t("review"), t("reviewHelp")]], mode, setMode, t("modeWord"));
+const labelsSeg = () => segOf("data-labels", [["auto", t("labelsAuto"), t("labelsAutoHelp")], ["always", t("labelsAlways")], ["never", t("labelsNever"), t("labelsNeverHelp")]], labelsMode, setLabels, t("labels"));
+const panesSeg = () => segOf("data-panes", [[1, "1"], [2, "2"], [3, "3"]], 1, (n) => { closeMenus(); setPaneCount(+n); }, t("panes"));
+const paintPaneCount = () => { paintSeg("data-panes", panes.length); document.body.classList.toggle("one-pane", panes.length === 1); };
+
+function langSelect(id) {
+  const ls = el("select", { id, "aria-label": t("lang"), title: t("lang") });
+  const names = { pt: "Português", en: "English", es: "Español", zh: "中文" };
+  for (const l of LANGS) ls.append(el("option", { value: l, title: names[l] }, l === "zh" ? names[l] : l.toUpperCase()));
+  ls.value = lang;
+  ls.onchange = () => {
+    const q = new URLSearchParams(location.search);
+    q.set("lang", ls.value);
+    location.search = q.toString();   // the #fragment stays
   };
-  label("undo", "↶", t("undo"));
-  label("redo", "↷", t("redo"));
-  $("save").textContent = t("save");
-  $("undo").onclick = undo;
-  $("redo").onclick = redo;
-  $("save").onclick = save;
-  $("panesLabel").textContent = t("panes");
-  // the map's title: typed in the header; one undo step per change. Made here, not in index.html, so a cached older
-  // index.html with this script still works.
-  const tb = el("input", { id: "mapTitle", type: "text", autocomplete: "off", spellcheck: "false" });
-  $("settings").before(tb);
+  return ls;
+}
+
+function setLabels(v) {
+  labelsMode = v;
+  pref.set("labels", v);
+  paintSeg("data-labels", v);
+  for (const p of panes) drawPane(p);
+}
+
+// Edit / Review. Review this round: look only (nothing moves or changes; the tools wait); what changed, counted and on
+// the map, comes next round.
+function setMode(v) {
+  if (v === mode) return;
+  closeMenus();
+  if (tool === "route") finishRoute();
+  mode = v;
+  document.body.classList.toggle("review", mode === "review");
+  paintSeg("data-mode", mode);
+  if (mode === "review") { tool = "select"; destFor = null; toast(t("reviewSoon")); }
+  applyTool();
+}
+
+// ---- the floors card: every floor with markers and how many; the floors shown (with their pane's number when side
+// by side); "+ N floors without markers" opens the rest; 1 / 2 / 3 side by side. A floor: the pane last clicked shows
+// it, and when none of its markers is in view the view goes to them.
+let floorsOpen = false;
+function paintFloorCard() {
+  const card = $("floorCard");
+  if (!card || !tileMeta) return;
+  const counts = FL.floorCounts(markers), target = targetPane();
+  const folded = pref.get("floorsFolded", "0") === "1";
+  card.textContent = "";
+  card.classList.toggle("folded", folded);
+  card.append(el("button", { type: "button", class: "h", "aria-expanded": String(!folded), title: t("floorsFold"),
+    onclick: () => { pref.set("floorsFolded", folded ? "0" : "1"); paintFloorCard(); } },
+  el("span", {}, t("floorsWord")), el("span", {}, folded ? "▸" : t("markersWord"))));
+  if (folded) return;
+  const shownIn = (f) => panes.map((p, i) => (p.floor === f ? i + 1 : 0)).filter(Boolean);
+  const withMarkers = tileMeta.floors.filter((f) => counts[f] || shownIn(f).length);
+  const empty = tileMeta.floors.filter((f) => !withMarkers.includes(f));
+  const list = el("div", { class: "rows" });
+  for (const f of floorsOpen ? tileMeta.floors : withMarkers) {
+    const ins = shownIn(f);
+    list.append(el("button", { type: "button", "data-floor": f,
+      class: "f" + (target.floor === f ? " on" : ins.length ? " shown" : "") + (counts[f] ? "" : " empty"),
+      "aria-pressed": String(target.floor === f), title: floorLabel(f), onclick: () => showFloor(f) },
+    el("b", {}, floorShort(f)),
+    panes.length > 1 && ins.length ? el("span", { class: "pn" }, ins.join("·")) : null,
+    counts[f] ? el("span", { class: "c" }, String(counts[f])) : null));
+  }
+  card.append(list);
+  if (empty.length) card.append(el("button", { type: "button", class: "more", onclick: () => { floorsOpen = !floorsOpen; paintFloorCard(); } },
+    floorsOpen ? t("floorsLess") : t("floorsMore", empty.filter((f) => !shownIn(f).length).length)));
+  card.append(el("div", { class: "side" }, el("span", {}, t("sideBySide")), panesSeg()));
+  paintPaneCount();
+}
+
+// a floor from the card or Go to: the pane last clicked shows it; its markers come into view
+function showFloor(f) {
+  const p = targetPane();
+  if (p.floor !== f) setFloor(p, f);
+  const mine = markers.filter((m) => m.floor === f).map(ML.where).filter(Boolean);
+  const view = p.map.getBounds();
+  if (mine.length && !mine.some(([x, z]) => view.contains(ll(x, z)))) {
+    p.map.fitBounds(L.latLngBounds(mine.map(([x, z]) => ll(x, z))).pad(0.15), { maxZoom: 3, animate: false });
+  }
+  refresh();
+  showCoordsFloor(p);
+}
+
+// the status bar: how many markers on how many floors
+function paintCount() {
+  const c = $("count");
+  if (!c) return;
+  const floors = Object.keys(FL.floorCounts(markers)).length;
+  c.textContent = markers.length ? t(floors === 1 ? "statusCount1" : "statusCount", markers.length, floors) : t("statusNone");
+}
+
+// ---- the link's size, live (Discord's message limit is 2,000 characters): the status bar's meter, a warning from
+// LINK_WARN, and past LINK_MAX: Share offers the file
+let meterTimer = 0, meterSeq = 0, meterWas = 0;
+function measureLinkSoon() {
+  clearTimeout(meterTimer);
+  meterTimer = setTimeout(measureLink, 250);
+}
+async function measureLink() {
+  if (!tileMeta || !panes.length || !$("meter")) return;
+  const seq = ++meterSeq;
+  let link, msg;
+  try {
+    // what Share gives: the link, and the message (the change list and the link) that goes to Discord
+    const state = ML.saveState(opened, clone(markers), currentView(), tileVersion, nextId, mapTitle);
+    const frag = await ML.encode(state), url = linkFor(frag);
+    link = url.length;
+    msg = (summaryText(changeLines(await ML.decode(frag))) + "\n" + url).length;
+  } catch { return; }
+  if (seq !== meterSeq) return;
+  const n = Math.max(link, msg), num = (v) => v.toLocaleString(lang);
+  const box = $("meter"), level = n > LINK_MAX ? "over" : n >= LINK_WARN ? "near" : "";
+  box.className = level;
+  box.querySelector(".txt").textContent = msg > link + 40 ? t("meter2", num(link), num(msg), num(LINK_MAX)) : t("meter", num(link), num(LINK_MAX));
+  box.querySelector("i").style.width = Math.min(100, (n / LINK_MAX) * 100).toFixed(1) + "%";
+  // on screen once each time an edit crosses a line upward (a link that opens long says it in the meter only)
+  if (meterWas && level && (meterWas <= LINK_MAX && n > LINK_MAX || meterWas < LINK_WARN && n >= LINK_WARN && n <= LINK_MAX)) toast(t(level === "over" ? "meterOver" : "meterNear", n));
+  meterWas = n;
+}
+
+// ---- Go to: a /pos line or x, z (go there, mark it, what is near it); a floor; a marker by name; another map link
+let gotoRows = [], gotoAt = 0, gotoSeq = 0;
+function gotoBox() {
+  const input = el("input", { id: "gotoBox", type: "search", autocomplete: "off", spellcheck: "false", placeholder: t("gotoPlaceholder"),
+    "aria-label": t("gotoWord"), role: "combobox", "aria-expanded": "false", "aria-controls": "gotoMenu" });
+  const menu = el("div", { id: "gotoMenu", role: "listbox", hidden: true });
+  input.addEventListener("input", gotoUpdate);
+  input.addEventListener("focus", () => { if (input.value.trim()) gotoUpdate(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); gotoMove(e.key === "ArrowDown" ? 1 : -1); }
+    else if (e.key === "Enter") { e.preventDefault(); gotoRows[gotoAt]?.act(); }
+    else if (e.key === "Escape") { if (!menu.hidden) { e.stopPropagation(); gotoClose(); } else input.blur(); }
+  });
+  input.addEventListener("blur", () => setTimeout(gotoClose, 150));
+  return el("div", { id: "goto" }, el("span", { class: "lens", "aria-hidden": "true" }, "⌕"), input, menu);
+}
+
+function gotoClose() {
+  $("gotoMenu").hidden = true;
+  $("gotoBox").setAttribute("aria-expanded", "false");
+}
+
+function gotoMove(d) {
+  if (!gotoRows.length) return;
+  gotoAt = (gotoAt + d + gotoRows.length) % gotoRows.length;
+  for (const [i, b] of [...$("gotoMenu").querySelectorAll(".r")].entries()) b.classList.toggle("on", i === gotoAt);
+}
+
+// what a marker is called, for the search and the lists: its name, monster, label, note
+const searchText = (m) => [labelOf(m), m.fields?.label, m.fields?.name, m.fields?.text, KIND_UI[m.kind] ? t("kind." + m.kind) : ""].filter(Boolean).join(" ");
+
+async function gotoUpdate() {
+  const q = $("gotoBox").value.trim(), seq = ++gotoSeq;
+  if (!q || !tileMeta) { gotoClose(); return; }
+  const groups = [];
+  const place = GT.parsePlace(q), frag = linkIn(q);
+  if (frag) groups.push([t("gotoLinkGroup"), [{ icon: "poi", title: t("gotoLink"), sub: t("gotoLinkSub"), act: () => openLinkFrag(frag) }]]);
+  else if (place) {
+    const floors = (await GT.placeFloors(place, tileMeta.floors, hasMapAt)) ?? [targetPane().floor];
+    if (seq !== gotoSeq) return;
+    const go = floors.map((f, i) => ({ icon: "poi", title: t("gotoGo", place.x, place.z, floorShort(f)), sub: t("gotoGoSub"), key: i ? null : "Enter", act: () => goTo(place.x, place.z, f) }));
+    if (mode === "edit") go.push({ glyph: "＋", title: t("gotoMark"), sub: t("gotoMarkSub", floorShort(floors[0])), act: () => markHere(place.x, place.z, floors[0]) });
+    groups.push([t("gotoPlace"), go]);
+    const near = GT.nearMarkers(markers, place.x, place.z, floors[0], ML.where, 40, 5);
+    if (near.length) groups.push([t("gotoNear"), near.map(({ m, d }) => markerRow(m, t("cellsAway", d)))]);
+  } else {
+    const f = GT.parseFloor(q, tileMeta.floors), counts = FL.floorCounts(markers);
+    if (f) groups.push([t("floorsWord"), [{ glyph: "≡", title: floorLabel(f), sub: counts[f] ? t("floorHas", counts[f]) : t("floorEmpty"), act: () => showFloor(f) }]]);
+    const hits = GT.searchMarkers(markers, q, searchText, 8);
+    if (hits.length) groups.push([t("gotoFound"), hits.map((m) => markerRow(m))]);
+  }
+  gotoRows = groups.flatMap(([, rows]) => rows);
+  gotoAt = 0;
+  const menu = $("gotoMenu");
+  menu.textContent = "";
+  if (!gotoRows.length) menu.append(el("div", { class: "empty" }, t("gotoNone")));
+  let i = 0;
+  for (const [title, rows] of groups) {
+    menu.append(el("div", { class: "grp" }, title));
+    for (const r of rows) {
+      const n = i++;
+      menu.append(el("button", { type: "button", role: "option", class: "r" + (n === 0 ? " on" : ""), tabindex: -1,
+        onpointerdown: (e) => e.preventDefault(),   // the box keeps the focus (its blur would close the menu first)
+        onclick: () => r.act() },
+      r.icon ? dotNode(r.icon) : el("span", { class: "mk mini plain" }, r.glyph || "·"),
+      el("div", {}, el("b", {}, r.title), r.sub ? el("span", {}, r.sub) : null),
+      r.key ? el("span", { class: "kbd" }, r.key) : null));
+    }
+  }
+  menu.append(el("div", { class: "foot" }, t("gotoHelp")));
+  menu.hidden = false;
+  $("gotoBox").setAttribute("aria-expanded", "true");
+}
+
+function markerRow(m, extra) {
+  const w = ML.where(m);
+  return { icon: m.kind in KIND_UI ? m.kind : null, glyph: "?", title: labelOf(m) || (KIND_UI[m.kind] ? t("kind." + m.kind) : m.kind),
+    sub: [floorShort(m.floor), extra, m.locked ? "🔒 " + t("context") : ""].filter(Boolean).join(" · "),
+    act: () => { gotoClose(); if (w) goTo(w[0], w[1], m.floor, m.id); } };
+}
+
+// centre the maps on a cell: the pane last clicked shows its floor (unless one already does); a ring shows the spot
+function goTo(x, z, floor, id = null) {
+  gotoClose();
+  let p = panes.find((q) => q.floor === floor);
+  if (!p) { p = targetPane(); setFloor(p, floor); }
+  p.map.setView(ll(x, z), Math.max(p.map.getZoom(), 3), { animate: false });
+  showCell(x, z, floor);
+  if (id != null) selected = id;
+  refresh();
+  const ring = L.circleMarker(ll(x, z), { radius: 16, color: "#ffe066", weight: 3, fill: false, interactive: false, className: "pulse" }).addTo(p.map);
+  setTimeout(() => ring.remove(), 2600);
+}
+
+function markHere(x, z, floor) {
+  goTo(x, z, floor);
+  commit(() => { const m = newMarker("poi", floor, { x, z }); markers.push(m); selected = m.id; });
+}
+
+// is there map on a floor at a cell? (the zoom-0 tile's pixel: one pixel a cell; a tile the set doesn't have: no)
+const tileCanvas = new Map();
+function hasMapAt(floor, x, z) {
+  const tx = Math.floor(x / 256), ty = Math.floor(-z / 256), name = tx + "_" + ty;
+  if (!(tileMeta.tiles[floor]?.["0"] || []).includes(name)) return Promise.resolve(false);
+  const url = `tiles/${tileVersion}/${floor}/0/${name}.png`;
+  if (!tileCanvas.has(url)) tileCanvas.set(url, new Promise((done) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = c.height = 256;
+      const g = c.getContext("2d", { willReadFrequently: true });
+      g.drawImage(img, 0, 0);
+      done(g);
+    };
+    img.onerror = () => done(null);
+    img.src = url;
+  }));
+  return tileCanvas.get(url).then((g) => !g || g.getImageData(x - tx * 256, -z - ty * 256, 1, 1).data[3] > 0);
+}
+
+function buildBar() {
+  buildFrame();
+  const tb = $("mapTitle");
   tb.placeholder = t("mapTitle");
   tb.title = t("mapTitle");
   tb.setAttribute("aria-label", t("mapTitle"));
@@ -1167,31 +1680,26 @@ function buildBar() {
     showTitle();
   });
   tb.addEventListener("keydown", (e) => { if (e.key === "Enter") tb.blur(); });
-  const ls = $("lang");
-  for (const l of LANGS) ls.append(el("option", { value: l }, { pt: "Português", en: "English", es: "Español", zh: "中文" }[l]));
-  ls.value = lang;
-  ls.onchange = () => {
-    const q = new URLSearchParams(location.search);
-    q.set("lang", ls.value);
-    location.search = q.toString();   // the #fragment stays
-  };
-  $("panes").onchange = () => setPaneCount(+$("panes").value);
   const dl = $("monsterList");
   for (const m of [...MONSTERS].sort()) dl.append(el("option", { value: m }));   // the list itself is append only
   // the bosses' names for the boss marker (made here, not in index.html: a cached older index.html still works)
   document.body.append(el("datalist", { id: "bossList" }, BOSSES.map(([name]) => el("option", { value: name }))));
   document.addEventListener("keydown", (e) => {
-    // Escape in a select (the floors, the panes) leaves it, then works as it does on the map
-    if (e.key === "Escape" && e.target.closest("select")) e.target.blur();
-    else if (e.target.closest("input, textarea, select")) return;
+    // Escape in a select (the floors) or a field of the panel leaves it (a field keeps what was typed), then works as
+    // it does on the map; Ctrl+K or "/" goes to the Go-to box
     const mod = e.ctrlKey || e.metaKey;
+    if ((mod && e.key.toLowerCase() === "k") || (e.key === "/" && !e.target.closest("input, textarea, select"))) {
+      e.preventDefault(); $("gotoBox").focus(); $("gotoBox").select(); return;
+    }
+    if (e.key === "Escape" && e.target.closest("select, #panel input, #panel textarea")) e.target.blur();
+    else if (e.target.closest("input, textarea, select")) return;
     if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
     else if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
     else if (e.key === "Enter" && tool === "route") finishRoute();
     else if (!mod && (e.key === "PageUp" || e.key === "]")) { e.preventDefault(); stepFloor(activePane || panes[0], -1); }
     else if (!mod && (e.key === "PageDown" || e.key === "[")) { e.preventDefault(); stepFloor(activePane || panes[0], 1); }
-    else if (e.key === "Escape" && closeThings()) return;
+    else if (e.key === "Escape" && closeMenus()) return;
     else if (e.key === "Escape" && tool === "dest") endDestPick();
     else if (e.key === "Escape") { draftRoute = null; selected = null; if (tool !== "select") setTool("select"); else refresh(); }
   });
@@ -1229,7 +1737,6 @@ async function start() {
   // the title: the link's own, else ?title= (someone's text either way: cleaned, shown as text only)
   mapTitle = state?.title || ML.cleanTitle(new URLSearchParams(location.search).get("title"));
   showTitle();
-  $("panes").value = String(view.floors.length);
   buildPanes(view.floors, view);
   // read-only hooks for the page's browser tests
   Object.defineProperty(window, "__panes", { get: () => panes });   // the panes now (side by side rebuilds them)

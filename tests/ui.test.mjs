@@ -65,8 +65,8 @@ test("Go to: the game's /pos, the page's copy, x z, x y z", () => {
 test("Go to: which floor a place is on", async () => {
   const has = async (f) => f === "-11";
   assert.deepEqual(await placeFloors(parsePlace("[pos] x -352.0, y -10.2, z 332.0 (floor -11)"), FLOORS, has), ["-11", "s"]);
-  // the game's "(floor 2)" on a hill of the surface: no map on slice 2 there, the surface only
-  assert.deepEqual(await placeFloors(parsePlace("[pos] x 0.0, y 3.3, z 0.0 (floor 2)"), FLOORS, has), ["s"]);
+  // the game's "(floor 2)" on a hill of the surface: no map on slice 2 there: the surface first, slice 2 still offered
+  assert.deepEqual(await placeFloors(parsePlace("[pos] x 0.0, y 3.3, z 0.0 (floor 2)"), FLOORS, has), ["s", "2"]);
   assert.deepEqual(await placeFloors(parsePlace("x 1 z 2 (surface)"), FLOORS, has), ["s"]);
   assert.deepEqual(await placeFloors(parsePlace("-352, -10.2, 332"), FLOORS, has), ["-11", "s"]);   // a bare y
   assert.equal(await placeFloors(parsePlace("-352, 332"), FLOORS, has), null);                      // the floor shown

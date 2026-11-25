@@ -36,17 +36,15 @@ export function parsePlace(text) {
 }
 
 // The floors a place may be on, the likeliest first: a "(surface)" tag: the surface; a floor tag or a y: that slice
-// (when the page has it and hasMap(floor, x, z) says there is map at the spot) and the surface; neither: null (the
-// floor shown now).
+// (when the page has it) and the surface, the slice first when hasMap(floor, x, z) finds map at the spot, else second
+// (a hill of the surface reads "floor 2" in the game); neither: null (the floor shown now).
 export async function placeFloors(place, floors, hasMap = async () => true) {
   if (place.tag === "s") return ["s"];
   const n = place.tag ?? (place.y != null ? String(Math.round(place.y - 0.8)) : null);
   if (n == null) return null;
   const slice = String(+n);
-  const out = [];
-  if (floors.includes(slice) && (await hasMap(slice, place.x, place.z))) out.push(slice);
-  out.push("s");
-  return out;
+  if (!floors.includes(slice)) return ["s"];
+  return (await hasMap(slice, place.x, place.z)) ? [slice, "s"] : ["s", slice];
 }
 
 // "andar -4", "floor -4", "piso -4", "-4 层", "superfície" / "surface" / "superficie" / "地面": that floor id; else null
