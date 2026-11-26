@@ -115,3 +115,22 @@ test("Go to: floors and markers by name", () => {
   const near = nearMarkers(ms, 0, 0, "s", (m) => [m.x, m.z], 40);
   assert.deepEqual(near.map((n) => [n.m.id, n.d]), [[1, 0], [2, 10]]);
 });
+
+test("owners: a cell's owner tile and pixel, as map_tiles.py cuts them", async () => {
+  const { ownerTile } = await import("../floors.js");
+  assert.deepEqual(ownerTile(0, 0), { key: "0_0", at: 0 });
+  // Setzer's sign at (108, -246): canvas pixel (1132, 1270) -> tile 0_0, row 246, column 108
+  assert.deepEqual(ownerTile(108, -246), { key: "0_0", at: 246 * 256 + 108 });
+  assert.deepEqual(ownerTile(-1, 1), { key: "-1_-1", at: 255 * 256 + 255 });
+  assert.deepEqual(ownerTile(256, -256), { key: "1_1", at: 0 });
+});
+
+test("owners: a marker takes the floor whose ledge the band shows, else the pane's", async () => {
+  const { cellFloor } = await import("../floors.js");
+  const { floorCode } = await import("../maplink.js");
+  assert.equal(cellFloor("-9", floorCode("-7") + 1), "-7");   // the -7 ledge in the -9 band (red 15)
+  assert.equal(floorCode("-7") + 1, 15);                      // tools/maplink.py floor_code("-7") + 1: the same red
+  assert.equal(cellFloor("-9", floorCode("s") + 1), "s");
+  assert.equal(cellFloor("-9", 0), "-9");                     // the floor's own cell
+  assert.equal(cellFloor("-9", undefined), "-9");             // no owner data (an old tile set): the pane's floor
+});

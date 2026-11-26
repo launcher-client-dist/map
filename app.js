@@ -238,6 +238,54 @@ function tileLayer(floor, opacity = 1) {
   });
 }
 
+// ---- Owners (tiles/<version>/owner/, floors.js ownerTile): the cells of a floor's band whose ground is another
+// floor's (dimmed in the tiles). A marker put or moved there takes that floor, so its /pos matches the game (Setzer's
+// sign on the -7 ledge, placed on the -9 view). Tiles load per pane floor and view; a link from a set without owners
+// works as before (every cell the pane's own).
+const owners = new Map();   // "floor|i_j" -> Uint8Array(65536) of red values, or a Promise while it loads
+function ownerValue(floor, x, z) {
+  const { key, at } = FL.ownerTile(x, z);
+  const got = owners.get(floor + "|" + key);
+  return got instanceof Uint8Array ? got[at] : undefined;
+}
+function loadOwner(floor, key) {
+  const k = floor + "|" + key;
+  if (owners.has(k)) return owners.get(k);
+  if (!(tileMeta.owner?.[floor] || []).includes(key)) { owners.set(k, new Uint8Array(65536)); return owners.get(k); }
+  const p = (async () => {
+    try {
+      const img = await createImageBitmap(await (await fetch(`tiles/${tileVersion}/owner/${floor}/${key}.png`)).blob());
+      const c = document.createElement("canvas");
+      c.width = c.height = 256;
+      const g = c.getContext("2d", { willReadFrequently: true });
+      g.drawImage(img, 0, 0);
+      const px = g.getImageData(0, 0, 256, 256).data, out = new Uint8Array(65536);
+      for (let i = 0; i < 65536; i++) out[i] = px[i * 4 + 3] ? px[i * 4] : 0;
+      owners.set(k, out);
+      for (const q of panes) if (q.floor === floor) drawPane(q);   // markers of the floor above now show here
+      return out;
+    } catch { owners.set(k, new Uint8Array(65536)); return owners.get(k); }
+  })();
+  owners.set(k, p);
+  return p;
+}
+// the owner tiles a pane's view touches
+function loadOwnersInView(p) {
+  if (p.floor === "s" || !tileMeta.owner?.[p.floor] || !p.map._loaded) return;   // (no view yet: its moveend loads them)
+  for (const key of FL.tilesInView(viewCorners(p))) loadOwner(p.floor, key);
+}
+// the floor of cell (x, z) on pane floor `floor`, then fn(floor): at once when its owner tile is loaded, else once it is
+function withCellFloor(floor, x, z, fn) {
+  if (floor === "s" || !tileMeta.owner?.[floor]) return fn(floor);
+  const v = ownerValue(floor, x, z);
+  if (v !== undefined) return fn(FL.cellFloor(floor, v));
+  Promise.resolve(loadOwner(floor, FL.ownerTile(x, z).key)).then(() => fn(FL.cellFloor(floor, ownerValue(floor, x, z))));
+}
+// a marker that landed on another floor than the pane's: say so (it shows here dimmed, and on its own floor)
+function toldFloor(paneFloor, floor) {
+  if (floor !== paneFloor) toast(t("ownerFloor", floorShort(floor)));
+}
+
 // ---- "Can't walk here" (reach/<version>/, the staff tools' map_reach.py): over each floor's picture, the cells a
 // player can't stand on (rocks, walls, props that block, void: dark) and the closed places (ground with no walk, rope,
 // portal or ladder in from open ground on today's map: pink). Zoom-0 tiles only (the page scales them); loaded the
@@ -324,7 +372,7 @@ function buildPanes(floors, view) {
     down.addEventListener("click", (e) => stepFloor(p, 1, e.shiftKey));
     mapEl.addEventListener("pointerenter", () => { activePane = p; });
     paneEl.addEventListener("pointerdown", () => { activePane = p; if (focusPane !== p) { focusPane = p; paintFloorCard(); } });
-    map.on("moveend", () => { paintFloorNav(p); measureLinkSoon(); });
+    map.on("moveend", () => { paintFloorNav(p); measureLinkSoon(); loadOwnersInView(p); });
     map.setView(ll(view.x, view.z), view.zoom, { animate: false });
     map.on("move", () => { sync(p); drawLinksSoon(); });
     map.on("zoomend resize", drawLinksSoon);
@@ -384,6 +432,7 @@ function setFloor(p, floor) {
   paintReach(p);
   p.layer.bringToFront?.();
   paintFloorNav(p);
+  loadOwnersInView(p);
 }
 
 // ---- floor up / down, by height (the surface between floor 0 and floor 1): the next floor that matters (markers, or
@@ -453,7 +502,11 @@ function posLine(x, z, floor) {
 
 function showCoords(p, latlng) {
   const [x, z] = cellOf(latlng);
-  showCell(x, z, p.floor);
+  showCell(x, z, cellFloorNow(p.floor, x, z));
+}
+// the cell's floor when its owner tile is loaded, else the pane's (the status bar, a hover: no waiting)
+function cellFloorNow(floor, x, z) {
+  return floor === "s" ? floor : FL.cellFloor(floor, ownerValue(floor, x, z));
 }
 // the status bar's cell (a click on it copies its /pos line)
 function showCell(x, z, floor) {
@@ -615,7 +668,7 @@ function drawDest(p, m) {
     if (pickSpot(p, e.latlng, e.originalEvent)) return;
     if (tool !== "area" && tool !== "route") select(m.id);
   });
-  end.on("dragend", () => { const [x, z] = cellOf(end.getLatLng()); selected = m.id; setDest(m.id, x, z, p.floor); });
+  end.on("dragend", () => { const [x, z] = cellOf(end.getLatLng()); selected = m.id; withCellFloor(p.floor, x, z, (f) => setDest(m.id, x, z, f)); });
   // its own floor's label only when the rope is selected or on the other floor (hover elsewhere): nothing cluttered
   const text = destLabel(m);
   if (sel || m.floor !== p.floor) end.bindTooltip(el("span", {}, text), { direction: "bottom", className: "lbl end", offset: [0, 8], permanent: sel });
@@ -692,14 +745,14 @@ function pickSpot(p, latlng, ev) {
   // where a group goes take the cell under the pointer
   if (ev && tool !== "dest") latlng = p.map.mouseEventToLatLng(ev);
   const [x, z] = cellOf(latlng);
-  if (tool === "dest") { setDest(destFor, x, z, p.floor); endDestPick(); return true; }
+  if (tool === "dest") { const id = destFor; withCellFloor(p.floor, x, z, (f) => { setDest(id, x, z, f); toldFloor(p.floor, f); }); endDestPick(); return true; }
   if (tool === "walls") { toggleWall(p, x, z); return true; }
   if (tool === "pulldest") { setPullDest(x, z, p.floor); return true; }
   if (tool === "movegroup") { moveGroupTo(x, z, p.floor); return true; }
   return false;
 }
 
-function drawMarker(p, m) {
+function drawMarker(p, m, ledge = false) {
   const k = { ...ui(m), color: colorOf(m) }, sel = isSel(m), rv = rvStatus(m);
   const pick = (e) => {
     L.DomEvent.stopPropagation(e);
@@ -718,18 +771,23 @@ function drawMarker(p, m) {
     if (m.kind === "spawn" && m.fields?.radius) {
       L.circle(ll(m.x, m.z), { radius: m.fields.radius, color: k.color, weight: 1, fillOpacity: 0.12, interactive: false }).addTo(p.layer);
     }
-    const mk = L.marker(ll(m.x, m.z), { icon: icon(m), draggable: canEdit(m), autoPan: true, zIndexOffset: sel ? 1000 : 0 });
+    const mk = L.marker(ll(m.x, m.z), { icon: icon(m), draggable: canEdit(m), autoPan: true, zIndexOffset: sel ? 1000 : 0,
+      opacity: ledge ? 0.6 : 1 });   // ledge: another floor's marker seen in this band
     mk.on("click", pick);
     mk.on("dragstart", () => { if (!multi.has(m.id)) { selected = m.id; multi.clear(); } });
     mk.on("dragend", () => {
       const [x, z] = cellOf(mk.getLatLng());
       if (multi.has(m.id)) { moveGroupBy(x - m.x, z - m.z); return; }   // one of a group: the group moves
-      commit(() => {
-        const n = byId(m.id);
-        if (!n || (n.x === x && n.z === z)) return false;
-        // a lever dragged alone: its walls and where it sends stay put (its code is relative to it)
-        if (n.fields?.pull) { const c = rebased(n.fields.pull, x - n.x, z - n.z); if (c) n.fields.pull = c; else delete n.fields.pull; }
-        n.x = x; n.z = z;
+      withCellFloor(p.floor, x, z, (floor) => {
+        commit(() => {
+          const n = byId(m.id);
+          if (!n || (n.x === x && n.z === z && n.floor === floor)) return false;
+          // a lever dragged alone: its walls and where it sends stay put (its code is relative to it)
+          if (n.fields?.pull) { const c = rebased(n.fields.pull, x - n.x, z - n.z); if (c) n.fields.pull = c; else delete n.fields.pull; }
+          n.x = x; n.z = z;
+          if (floor !== n.floor) n.floor = floor;
+        });
+        if (floor !== m.floor) toldFloor(p.floor, floor);
       });
     });
     const label = labelOf(m), d = destOf(m), away = d && d.floor !== m.floor ? leadsText(d.floor) : "";
@@ -839,6 +897,12 @@ function drawPane(p) {
   // areas under routes under points; the selected one last
   const order = (m) => (m.cells ? 0 : m.points ? 1 : 2) + (isSel(m) ? 3 : 0);
   for (const m of mine.sort((a, b) => order(a) - order(b))) drawMarker(p, m);
+  // markers of another floor standing on a ledge this band shows (its owner pixel names their floor): drawn dimmed
+  if (p.floor !== "s") for (const m of markers) {
+    if (m.floor === p.floor || !("x" in m) || !shown(m)) continue;
+    const v = ownerValue(p.floor, m.x, m.z);
+    if (v && FL.cellFloor(p.floor, v) === m.floor) drawMarker(p, m, true);
+  }
   // the end markers of ropes, holes and portals from other floors that land on this one (and levers that send here)
   for (const m of markers) {
     if (m.floor === p.floor || !shown(m)) continue;
@@ -1145,8 +1209,9 @@ function onMapClick(p, e) {
     selected = null;
     multi.clear();
     refresh();
-    showCell(x, z, p.floor);
-    copy(posLine(x, z, p.floor));
+    const f = cellFloorNow(p.floor, x, z);
+    showCell(x, z, f);
+    copy(posLine(x, z, f));
     return;
   }
   if (tool === "area") return;
@@ -1163,10 +1228,15 @@ function onMapClick(p, e) {
     refresh();
     return;
   }
+  withCellFloor(p.floor, x, z, (floor) => placeAt(p, x, z, floor));
+}
+
+// a place tool's tap, once the cell's floor is known (the pane's, or the floor whose ledge the band shows there)
+function placeAt(p, x, z, floor) {
   const kind = tool;
   let id;
   commit(() => {
-    const m = newMarker(kind, p.floor, { x, z });
+    const m = newMarker(kind, floor, { x, z });
     if (kind === "spawn") {   // the stamp: the monster, how many and how far of the last one
       if (stamp.monster) m.fields.monster = stamp.monster;
       m.fields.count = stamp.count;
@@ -1175,6 +1245,7 @@ function onMapClick(p, e) {
     markers.push(m);
     selected = id = m.id;
   });
+  toldFloor(p.floor, floor);
   stampPlaced++;
   // on a phone the drawer would cover the map: a spawn stays unselected (the sub-bar holds its settings), any other
   // kind opens its panel (its name to type) and the tool goes back to Select
