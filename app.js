@@ -239,7 +239,7 @@ function tileLayer(floor, opacity = 1) {
 }
 
 // ---- Owners (tiles/<version>/owner/, floors.js ownerTile): the cells of a floor's band whose ground is another
-// floor's (dimmed in the tiles). A marker put or moved there takes that floor, so its /pos matches the game (Setzer's
+// floor's (dimmed in the tiles). A marker put or moved there takes that floor, so its /pos matches the game (a mapper's
 // sign on the -7 ledge, placed on the -9 view). Tiles load per pane floor and view; a link from a set without owners
 // works as before (every cell the pane's own).
 const owners = new Map();   // "floor|i_j" -> Uint8Array(65536) of red values, or a Promise while it loads

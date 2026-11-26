@@ -119,7 +119,7 @@ test("Go to: floors and markers by name", () => {
 test("owners: a cell's owner tile and pixel, as map_tiles.py cuts them", async () => {
   const { ownerTile } = await import("../floors.js");
   assert.deepEqual(ownerTile(0, 0), { key: "0_0", at: 0 });
-  // Setzer's sign at (108, -246): canvas pixel (1132, 1270) -> tile 0_0, row 246, column 108
+  // a mapper's sign at (108, -246): canvas pixel (1132, 1270) -> tile 0_0, row 246, column 108
   assert.deepEqual(ownerTile(108, -246), { key: "0_0", at: 246 * 256 + 108 });
   assert.deepEqual(ownerTile(-1, 1), { key: "-1_-1", at: 255 * 256 + 255 });
   assert.deepEqual(ownerTile(256, -256), { key: "1_1", at: 0 });
