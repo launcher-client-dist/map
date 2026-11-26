@@ -145,6 +145,11 @@ The same two maps saved as format 2:
   per tile, one class per cell the coloured tiles draw (0 nothing, 1 can't stand, 2 closed, 3 water); tiles with nothing
   in them left out; `reach/<version>/meta.json`: the floors, the tiles present, when the data was made, the colours.
   Map geometry only, like the tiles: no heights, no ids, no counts, nothing of anyone.
+- `tiles/<version>/owner/<floor>/<x>_<y>.png`: which floor each cell of a floor's view belongs to, zoom 0 only. A
+  floor's view also shows the ground up to two cubes above it; where that ground is another floor's (a ledge two or
+  more above, which the coloured tile draws dimmed), red = that floor's link code + 1 (`maplink.js` `floorCode`),
+  transparent elsewhere; `meta.json` `owner` lists the tiles. A marker put or moved on such a cell takes that floor
+  (`floors.js` `ownerTile`, `cellFloor`), so its /pos matches the game. Map geometry only, like the tiles.
 
 ## Running it locally
 

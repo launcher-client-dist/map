@@ -1,4 +1,5 @@
 // Floor up / down: which floor a step goes to. No DOM here: the page and the tests (node) share it.
+import { floorOf } from "./maplink.js";
 // floors: the tile set's floors from the top (the surface "s", then 10 .. -16); tiles: {floor: {"0": ["x_y", ...]}}, the
 // zoom-0 tiles each floor has (256 cells a side); view: [x0, y0, x1, y1], the view's corners in zoom-0 pixels.
 
@@ -83,4 +84,20 @@ export function openingFloors(saved, counts, landings = []) {
     out.push(next ?? f);
   }
   return out;
+}
+
+// ---- Owners (tiles/<version>/owner/<floor>/<i>_<j>.png, map_tiles.py): in a floor's band, the cells whose ground
+// belongs to another floor (a ledge 2 or more above it: the -7 ledge shown in the -9 band). A pixel's red is that
+// floor's link code + 1 (maplink.js floorCode); 0 or transparent: the floor's own. Zoom-0 tiles, one pixel a cell,
+// cell (x, z) at canvas pixel (x + 1024, -z + 1024), tile i = floor(x / 256), j = floor(-z / 256) (as map_tiles cuts).
+export function ownerTile(x, z) {
+  const px = x + 1024, py = -z + 1024;
+  const i = Math.floor(px / 256) - 4, j = Math.floor(py / 256) - 4;
+  return { key: i + "_" + j, at: (py - (j + 4) * 256) * 256 + (px - (i + 4) * 256) };
+}
+
+// the floor a marker put on cell (x, z) of the pane on `floor` belongs to: the owner pixel's floor, else the pane's.
+// value: the owner pixel's red (0: the floor's own; undefined: no owner data, the pane's floor)
+export function cellFloor(floor, value) {
+  return value ? floorOf(value - 1) : floor;
 }
