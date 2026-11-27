@@ -11,6 +11,7 @@ import { translator3 } from "./words3d.js";
 import { sliderValue } from "./slider.js";
 import { createObjects, unpack } from "./objects3d.js";
 import { moveKey, moveStep } from "./move.js";
+import * as RP from "./ramp.js";
 
 const BASE = new URL("./", import.meta.url);
 // the game's camera (the staff tools' gamecam.py, measured on the real client): FOV 25° vertical, pitched 57° down, the
@@ -63,6 +64,7 @@ export async function open(api) {
     look: hasB && q.get("look") !== "c" ? "b" : "c", check: q.get("check") !== "0", walls: q.get("walls") === "1", tops: q.get("tops") === "1",
     floor: q.get("floor") || "all", cut: q.get("cut") != null && q.get("cut") !== "" ? +q.get("cut") : null,
     tool: null, pending: null, hover: null, clip: [], asset: null,
+    ramp: null, rampWidth: Math.min(3, Math.max(1, +q.get("rampw") || 2)),   // (the ramp being placed: its first end, plan and check)
   };
   const OBJ = createObjects(THREE, { base: BASE, t: api.t, onChange: () => paintMarkersSoon() });
   if (S.clean) root.classList.add("clean");
@@ -343,6 +345,7 @@ export async function open(api) {
   // ---- markers
   const KIND_SHAPE = { rope: "post", rope2: "post", portal: "portal", hole: "hole", spawn: "spawn", elevator: "portal" };
   let problems = { problems: [], passed: {} };
+  let rampDraw = [];   // [[marker, plan, walk]] the ramps as last painted
   let pins = [];   // [{n, x, y, z, level}] the problems' numbered pins (HTML, projected each frame)
   function standOf(x, z, floor) {
     const c = cellAt(x, z);
@@ -443,6 +446,20 @@ export async function open(api) {
     problems = CD.problemsOf(list, cellAt);
     const bad = new Map();
     for (const p of problems.problems) bad.set(p.id + ":" + p.end, p);
+    // the ramps: their pieces and their walk, a problem row each when it doesn't walk both ways
+    rampDraw = [];
+    for (const m of list) {
+      if (m.kind !== "ramp") continue;
+      const plan = RP.planOfMarker(m, cellAt);
+      if (!plan) continue;
+      const walk = rampCheck(plan);
+      rampDraw.push([m, plan, walk]);
+      if (!walk) { problems.passed.unloaded = (problems.passed.unloaded || 0) + 1; continue; }
+      if (walk.ok) { problems.passed.ramps = (problems.passed.ramps || 0) + 1; continue; }
+      const r0 = walk.reasons.find((r) => "x" in r) || {};
+      problems.problems.unshift({ id: m.id, kind: "ramp", end: "ramp", x: r0.x ?? plan.lo.x, z: r0.z ?? plan.lo.z, floor: m.floor, level: "bad",
+        reasons: walk.reasons, ramp: true, stand: null, f: plan.lo.f });
+    }
     pins = [];
     let n = 0;
     for (const p of problems.problems) {
@@ -451,6 +468,11 @@ export async function open(api) {
       p.n = n;
     }
     for (const m of list) {
+      if (m.kind === "ramp") {
+        const d = rampDraw.find(([r]) => r === m);
+        if (d) { const g = rampGroup(d[1], d[2], m.id === sel); g.userData.id = m.id; marksG.add(g); }
+        continue;
+      }
       if (m.cells || m.points) { const g = areaOrRoute(m); if (g) marksG.add(g); continue; }
       if (!("x" in m)) continue;
       const y = standOf(m.x, m.z, m.floor);
@@ -526,6 +548,146 @@ export async function open(api) {
     }
     return g;
   }
+  // ---- ramps (map3d/ramp.js plans the pieces and walks them): the pieces as a ghost of blocks and wedges in the
+  // ground's colour (the same in both looks), edged in the check's colour, and the walk as a line (up solid, down
+  // dashed; green when it gets there, red to where it stops)
+  const layerAtF = (x, z, f) => cellAt(x, z)?.layers.find((l) => l.f === f) || null;
+  function rampCheck(plan) {
+    const ends = [plan.lo, plan.hi];
+    if (ends.some((e) => !cellAt(e.x, e.z))) return null;   // (not loaded: not checked)
+    return RP.walkRamp(plan, cellAt, layerAtF);
+  }
+  function wedge(k) {   // a slope cube: a box whose top rises one cube across its cell (k: RP.DIRS' slope type)
+    const geo = new THREE.BoxGeometry(1, 1, 1);
+    const [ax, az] = { 1: [0, 1], 2: [1, 0], 3: [0, -1], 4: [-1, 0] }[k];
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) if (pos.getY(i) > 0) pos.setY(i, -0.5 + Math.min(1, Math.max(0, pos.getX(i) * ax + pos.getZ(i) * az + 0.5)));
+    geo.computeVertexNormals();
+    return geo;
+  }
+  function rampGroup(plan, walk, sel) {
+    const g = new THREE.Group();
+    const level = walk ? (walk.ok ? "ok" : "bad") : "warn";
+    // (shaded by hand: the walked tops light, the sides darker, so the ramp reads against ground of its own colour)
+    const base = new THREE.Color(KIND_RGB[plan.ground] || KIND_RGB.dirt);
+    const face = (k) => new THREE.MeshBasicMaterial({ color: base.clone().multiplyScalar(k), transparent: true, opacity: 0.93, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1 });
+    const top = face(1.18), side = face(0.62), side2 = face(0.8);
+    const body = [side, side, top, side, side2, side2];   // (a box's groups: +x, -x, +y, -y, +z, -z)
+    const edge = new THREE.LineBasicMaterial({ color: sel ? "#ffe066" : LEVEL_RGB[level], transparent: true, depthTest: false });
+    const add = (geo, x, y, z) => {
+      const m = new THREE.Mesh(geo, body);
+      m.position.set(x, y, z);
+      m.renderOrder = 3;
+      const e = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), edge);
+      e.position.copy(m.position);
+      e.renderOrder = 4;
+      g.add(m, e);
+    };
+    for (const c of plan.cols) {
+      if (c.y0 > c.top) continue;
+      // (mesh heights: cube y fills y - 1 .. y) supports y0 .. top - 1 as one box, then the top cube: a wedge or a box
+      const top0 = c.k ? c.top - 1 : c.top;
+      if (top0 > c.y0 - 1) add(new THREE.BoxGeometry(1, top0 - (c.y0 - 1), 1), c.x, (c.y0 - 1 + top0) / 2, c.z);
+      if (c.k) add(wedge(c.k), c.x, c.top - 0.5, c.z);
+    }
+    // the two ends: a ring on each (the low end hollow, the high end full)
+    for (const [e, r0] of [[plan.lo, 0.3], [plan.hi, 0]]) {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(r0, 0.42, 24), new THREE.MeshBasicMaterial({ color: LEVEL_RGB[level], side: THREE.DoubleSide, transparent: true, depthTest: false }));
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(e.x, e.f + 0.06, e.z);
+      ring.renderOrder = 5;
+      g.add(ring);
+    }
+    if (walk && !walk.walks.length && plan.run) {   // (no walk at all: too steep, short or long) a red line end to end
+      const pts = [plan.lo, plan.hi].map((e) => new THREE.Vector3(e.x, e.f + 0.15, e.z));
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineDashedMaterial({ color: LEVEL_RGB.bad, dashSize: 0.3, gapSize: 0.2, depthTest: false, transparent: true }));
+      line.computeLineDistances();
+      line.renderOrder = 6;
+      g.add(line);
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.LineCurve3(pts[0], pts[1]), 8, 0.05, 6, false),
+        new THREE.MeshBasicMaterial({ color: LEVEL_RGB.bad, depthTest: false, transparent: true, opacity: 0.85 }));
+      tube.renderOrder = 6;
+      g.add(tube);
+    }
+    const [dx, dz] = RP.DIRS[plan.dir] || [1, 0];
+    for (const w of walk?.walks || []) {   // (server scale: a stand height is the cube top + 0.3, the mesh's top + 0.8)
+      // the walk up a tube over the centre line, the walk down a thinner one beside it (seen through the ground)
+      const side = w.way === "up" ? 0 : 0.22, lift = w.way === "up" ? 0.14 : 0.1;
+      const pts = w.path.map(([x, y, z]) => new THREE.Vector3(x + side * dz, y - STAND + lift, z - side * dx));
+      if (pts.length < 2) continue;
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, false, "centripetal"), Math.min(200, pts.length * 2), w.way === "up" ? 0.07 : 0.045, 6, false),
+        new THREE.MeshBasicMaterial({ color: LEVEL_RGB[w.ok ? "ok" : "bad"], depthTest: false, transparent: true, opacity: w.way === "up" ? 1 : 0.75 }));
+      tube.renderOrder = 6;
+      g.add(tube);
+      if (!w.ok) {   // where it stops: a red ball
+        const ball = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color: LEVEL_RGB.bad, depthTest: false }));
+        ball.position.copy(pts[pts.length - 1]);
+        ball.scale.setScalar(1.6);
+        ball.renderOrder = 6;
+        g.add(ball);
+      }
+    }
+    return g;
+  }
+  // the words of a ramp's check: "Ramp +3 over 5 cells: walks up and back down" or its first reasons
+  function rampWords(plan, walk) {
+    if (!walk) return t3("rampBad", plan.rise, plan.run, t3("unloaded", 1));
+    if (walk.ok) return t3("rampOk", plan.rise, plan.run);
+    return t3("rampBad", plan.rise, plan.run, walk.reasons.slice(0, 2).map((r) => RP.rampReason(r, t3)).join("; "));
+  }
+  const rampG = new THREE.Group();   // the ramp being placed
+  world.add(rampG);
+  function rampEnd(pk) { return pk && pk.layer ? { x: pk.x, z: pk.z, f: pk.layer.f, floor: pk.layer.floor } : null; }
+  // the far end under the cursor, snapped onto the straight line from the first end; its height: the layer there
+  // nearest the height pointed at
+  function rampFar(a, pk) {
+    if (!pk) return null;
+    const dir = RP.axisOf(a, pk);
+    const x = dir === "E" || dir === "W" ? pk.x : a.x, z = dir === "E" || dir === "W" ? a.z : pk.z;
+    const c = cellAt(x, z);
+    if (!c || !c.layers.length) return null;
+    const want = pk.layer && pk.x === x && pk.z === z ? pk.layer.f : pk.y;
+    const l = c.layers.filter((q) => !(q.bad & CD.BAD.roof)).reduce((p, q) => (!p || Math.abs(q.f - want) < Math.abs(p.f - want) ? q : p), null) || c.layers[0];
+    return { x, z, f: l.f, floor: l.floor };
+  }
+  function previewRamp(b) {
+    disposeGroup(rampG);
+    const a = S.ramp?.a;
+    if (!a) { draw(); return; }
+    if (!b) { rampG.add(rampGroup({ lo: a, hi: a, cols: [], ground: "dirt" }, null, false)); S.ramp.plan = null; draw(); return; }
+    const plan = RP.planRamp(a, b, S.rampWidth, cellAt), walk = rampCheck(plan);
+    S.ramp.plan = plan; S.ramp.walk = walk; S.ramp.b = b;
+    rampG.add(rampGroup(plan, walk, false));
+    showHint(rampWords(plan, walk));
+    hint.dataset.level = walk?.ok ? "ok" : "bad";
+    draw();
+  }
+  function finishRamp(b) {
+    const a = S.ramp?.a;
+    if (!a || !b || (a.x === b.x && a.z === b.z)) return false;
+    const plan = RP.planRamp(a, b, S.rampWidth, cellAt), walk = rampCheck(plan);
+    const id = api.placeRamp ? api.placeRamp([[plan.lo.x, plan.lo.z], [plan.hi.x, plan.hi.z]], plan.lo.floor || a.floor, RP.fieldsOfPlan(plan)) : null;
+    S.ramp = null;
+    disposeGroup(rampG);
+    showHint(id != null ? t3("rampPlaced", plan.rise) + " · " + rampWords(plan, walk) : "");
+    hint.dataset.level = walk?.ok ? "ok" : "bad";
+    return true;
+  }
+  // a ramp moved to another spot (pasted): its ends on the ground there, the same climb, the pieces planned again
+  function refitRamp(m) {
+    if (m.kind !== "ramp" || !m.points || m.points.length < 2) return m;
+    const [[x0, z0], [x1, z1]] = m.points, c0 = cellAt(x0, z0);
+    const l0 = c0 && CD.layerFor(c0, m.floor);
+    if (!l0) return m;
+    const rise = (+m.fields.hi || 0) - (+m.fields.lo || 0);
+    const b = rampFar({ x: x0, z: z0, f: l0.f }, { x: x1, z: z1, y: l0.f + rise, layer: null });
+    if (!b) return m;
+    const plan = RP.planRamp({ x: x0, z: z0, f: l0.f, floor: l0.floor }, b, +m.fields.width || 1, cellAt);
+    m.points = [[plan.lo.x, plan.lo.z], [plan.hi.x, plan.hi.z]];
+    m.fields = { ...m.fields, ...RP.fieldsOfPlan(plan) };
+    return m;
+  }
+
   let paintQueued = false;
   function paintMarkersSoon() { if (!paintQueued) { paintQueued = true; requestAnimationFrame(() => { paintQueued = false; paintMarkers(); }); } }
 
@@ -578,14 +740,36 @@ export async function open(api) {
 
   function paintStatus() { status.hidden = loadingN === 0; status.textContent = t3("loading"); root.dataset.ready = loadingN === 0 && chunks.size ? "1" : "0"; }
 
-  const TOOLS = [["rope", "p.rope", "#ff7a1a", "⚓"], ["portal", "p.portal", "#8e4ec6", "◎"], ["landing", "p.landing", "#30c46c", "⬇"], ["spawn", "p.spawn", "#e5322d", "⚔"]];
+  const TOOLS = [["rope", "p.rope", "#ff7a1a", "⚓"], ["portal", "p.portal", "#8e4ec6", "◎"], ["landing", "p.landing", "#30c46c", "⬇"], ["spawn", "p.spawn", "#e5322d", "⚔"], ["ramp", "p.ramp", "#d9a521", "◢"]];
   function paintPlace() {
     placeBox.replaceChildren(h("div", { class: "v3d-k" }, t3("place")),
       h("div", { class: "v3d-tools" }, TOOLS.map(([k, w, c, g], i) => h("button", { type: "button", "data-place": k, class: S.tool === k ? "on" : "", title: t3(w) + " (" + (i + 1) + ")", onclick: () => setTool(S.tool === k ? null : k) },
         h("span", { class: "g", style: `color:${c}` }, g), h("span", {}, t3(w)), h("kbd", {}, String(i + 1))))),
+      rampWidthRow(),
       h("div", { class: "v3d-key" }, ...[["ok", "keyOk"], ["warn", "keyWarn"], ["bad", "keyBad"]].map(([l, w]) => h("span", {}, h("i", { style: `background:${LEVEL_RGB[l]}` }), t3(w)))));
   }
+  // a ramp's width (1..3 cells): the one being placed, or the selected ramp's (planned again)
+  function rampWidthRow() {
+    const m = api.markers().find((x) => x.id === api.selected());
+    const selRamp = m && m.kind === "ramp" ? m : null;
+    if (S.tool !== "ramp" && !selRamp) return null;
+    const now = selRamp && S.tool !== "ramp" ? +selRamp.fields?.width || 1 : S.rampWidth;
+    return h("div", { class: "v3d-rampw", title: t3("rampWidthHelp") }, h("span", { class: "v3d-k" }, t3("rampWidth")),
+      pill("data-rampw", [[1, "1"], [2, "2"], [3, "3"]], now, (v) => setRampWidth(+v, S.tool === "ramp" ? null : selRamp)));
+  }
+  function setRampWidth(w, m) {
+    if (m && api.edit) {   // the selected ramp: planned again at this width on its own ends
+      const plan = RP.planOfMarker({ ...m, fields: { ...m.fields, width: w, pieces: "" } }, cellAt);
+      if (plan) api.edit(m.id, (n) => { n.fields = { ...n.fields, ...RP.fieldsOfPlan(plan) }; });
+    } else {
+      S.rampWidth = w;
+      if (S.ramp?.b) previewRamp(S.ramp.b);
+    }
+    paintPlace();
+  }
   function setTool(k) {
+    if (S.ramp) { S.ramp = null; disposeGroup(rampG); }
+    delete hint.dataset.level;
     S.tool = k; S.pending = null;
     if (k === "landing") {
       const m = api.markers().find((x) => x.id === api.selected());
@@ -595,7 +779,7 @@ export async function open(api) {
     showHint(k ? t3("hint." + k) : "");
     paintPlace();
   }
-  function showHint(text) { hint.hidden = !text; hint.textContent = text; }
+  function showHint(text) { hint.hidden = !text; hint.textContent = text; if (!text) delete hint.dataset.level; }
 
   function floorWord(f) { return f === "s" ? api.t("surface") : api.t("floor", f); }
   // the floors the view's ground holds (a standing layer within a chunk of the centre), top first
@@ -709,7 +893,7 @@ export async function open(api) {
   // the keyboard: one key each (nothing while typing in a field); "?" lists them
   const KEYS = [["PageUp  ]", "kFloorUp"], ["PageDown  [", "kFloorDown"], ["0", "kFloorAll"], [",  .", "kCut"],
     ["W  A  S  D", "kMove"], ["Q  E", "kRotate"], ["+  −", "kZoom"], ["P", "kPlayer"], ["F", "kFree"], ["C", "kCheck"], ["H", "kTops"], ["I", "kWalls"],
-    ["M", "kObjects"], ["1  2  3  4", "kPlace"], ["Ctrl+C  Ctrl+V", "kCopy"], ["kAltClick", "kBlock"], ["Esc", "kEsc"], ["?", "kHelp"]];
+    ["M", "kObjects"], ["1  2  3  4", "kPlace"], ["5", "kPlaceRamp"], ["Ctrl+C  Ctrl+V", "kCopy"], ["kAltClick", "kBlock"], ["Esc", "kEsc"], ["?", "kHelp"]];
   function toggleHelp(on = !S.help) {
     S.help = on;
     helpBox.hidden = !on;
@@ -723,16 +907,17 @@ export async function open(api) {
       const m = api.markers().find((x) => x.id === p.id);
       const own = m && api.labelOf(m);
       const name = own && own !== "?" ? own : api.t("kind." + p.kind);
-      const where = `(${p.x}, ${p.stand != null ? fmt(p.stand) : "?"}, ${p.z})`;
+      const where = p.ramp ? `(${p.x}, ${p.z})` : `(${p.x}, ${p.stand != null ? fmt(p.stand) : "?"}, ${p.z})`;
       return h("div", { class: "v3d-prob " + p.level },
         h("span", { class: "n" }, String(p.n)),
-        h("div", { class: "b" }, h("div", { class: "t" }, p.end === "dest" ? t3("endDest", name) : t3("endAt", name)),
-          h("div", { class: "s" }, where + " · " + p.reasons.map((r) => CD.reasonText(r, t3)).join("; "))),
+        h("div", { class: "b" }, h("div", { class: "t" }, p.ramp ? t3("rampEnd", name) : p.end === "dest" ? t3("endDest", name) : t3("endAt", name)),
+          h("div", { class: "s" }, where + " · " + p.reasons.map((r) => (p.ramp ? RP.rampReason(r, t3) : CD.reasonText(r, t3))).join("; "))),
         h("button", { type: "button", class: "go", onclick: () => { api.select(p.id); goTo(p.x, p.z); } }, t3("goTo")));
     });
     const ok = [];
     if (pass.spots) ok.push(h("div", { class: "v3d-pass" }, h("i"), t3("passedSpots", pass.spots)));
     if (pass.landings) ok.push(h("div", { class: "v3d-pass" }, h("i"), t3("passedLandings", pass.landings)));
+    if (pass.ramps) ok.push(h("div", { class: "v3d-pass" }, h("i"), t3("passedRamps", pass.ramps)));
     if (pass.unloaded) ok.push(h("div", { class: "v3d-pass off" }, h("i"), t3("unloaded", pass.unloaded)));
     if (!P.length && !ok.length) ok.push(h("div", { class: "v3d-sub" }, t3("nothingChecked")));
     probBox.replaceChildren(h("div", { class: "v3d-k" }, P.length ? t3("problems", P.length) : t3("problems0")), ...rows, ...ok);
@@ -826,6 +1011,7 @@ export async function open(api) {
   world.add(hoverMesh, hoverEdge);
   function showHover(pk) {
     S.hover = pk;
+    if (S.tool === "ramp" && S.ramp?.a && pk) previewRamp(rampFar(S.ramp.a, pk));
     if (!pk) { hoverMesh.visible = hoverEdge.visible = false; tipBox.hidden = true; draw(); return; }
     const y = (pk.layer ? pk.layer.f : pk.cube ? pk.cube.y : pk.y) + 0.04;
     for (const m of [hoverMesh, hoverEdge]) { m.position.set(pk.x, y, pk.z); m.visible = S.check || !!S.tool; }
@@ -848,6 +1034,11 @@ export async function open(api) {
 
   // a click: place with the armed tool, else select the marker under it
   function click(pk, e) {
+    if (S.tool === "ramp" && pk) {   // the first click: the low end; the second: the high end (on the line), placed
+      if (!S.ramp) { const a = rampEnd(pk); if (a) { S.ramp = { a }; showHint(t3("hint.rampHigh")); previewRamp(null); } return; }
+      finishRamp(rampFar(S.ramp.a, pk));
+      return;
+    }
     if (S.tool && pk && pk.layer) {
       const floor = pk.layer.floor;
       if (S.pending != null) {   // a landing for the rope or portal just placed (or selected)
@@ -871,6 +1062,13 @@ export async function open(api) {
     if (pk) {
       let best = null, bd = 1.6;
       for (const m of api.markers()) {
+        if (m.kind === "ramp" && m.points?.length >= 2) {   // a ramp: the nearest point of its line
+          const [[x0, z0], [x1, z1]] = m.points, L2 = (x1 - x0) ** 2 + (z1 - z0) ** 2 || 1;
+          const u = Math.min(1, Math.max(0, ((pk.x - x0) * (x1 - x0) + (pk.z - z0) * (z1 - z0)) / L2));
+          const d = Math.hypot(x0 + u * (x1 - x0) - pk.x, z0 + u * (z1 - z0) - pk.z);
+          if (d < bd) { bd = d; best = m; }
+          continue;
+        }
         if (!("x" in m)) continue;
         const d = Math.hypot(m.x - pk.x, m.z - pk.z);
         if (d < bd) { bd = d; best = m; }
@@ -888,6 +1086,8 @@ export async function open(api) {
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   canvas.addEventListener("pointerdown", (e) => {
     drag = { x: e.clientX, y: e.clientY, sx: S.x, sz: S.z, yaw: S.yaw, pitch: S.pitch, rot: e.button === 2 || e.shiftKey, moved: false };
+    // the ramp tool: a drag from the low end draws the ramp (no pan)
+    if (S.tool === "ramp" && !S.ramp && !drag.rot) { const a = rampEnd(pick(e.clientX, e.clientY)); if (a) drag.ramp = a; }
     canvas.setPointerCapture(e.pointerId);
   });
   canvas.addEventListener("pointermove", (e) => {
@@ -895,6 +1095,13 @@ export async function open(api) {
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
       if (!drag.moved) return;
+      if (drag.ramp) {
+        if (!S.ramp) { S.ramp = { a: drag.ramp }; showHint(t3("hint.rampHigh")); }
+        const pk = pick(e.clientX, e.clientY);
+        S.hover = pk;
+        previewRamp(rampFar(S.ramp.a, pk));
+        return;
+      }
       if (drag.rot) {
         S.free = true;
         S.yaw = (drag.yaw - dx * 0.3 + 360) % 360;
@@ -915,6 +1122,7 @@ export async function open(api) {
   canvas.addEventListener("pointerup", (e) => {
     const d = drag;
     drag = null;
+    if (d && d.moved && d.ramp && S.ramp) { finishRamp(rampFar(S.ramp.a, pick(e.clientX, e.clientY))); return; }
     if (d && d.moved) { update(); return; }
     click(pick(e.clientX, e.clientY), e);
   });
@@ -956,6 +1164,7 @@ export async function open(api) {
     if (mod || e.altKey) return;   // (Ctrl+Z and the page's other keys go on to the page)
     if (k === "Escape") {
       if (S.help) return act(() => toggleHelp(false));
+      if (S.tool === "ramp" && S.ramp) return act(() => { S.ramp = null; disposeGroup(rampG); delete hint.dataset.level; showHint(t3("hint.ramp")); draw(); });
       if (S.tool || S.pending != null) return act(() => setTool(null));
       if (S.asset) return act(() => selectAsset(null));
       return;
@@ -965,7 +1174,8 @@ export async function open(api) {
       "+": () => zoomBy(0.8), "=": () => zoomBy(0.8), "-": () => zoomBy(1.25), p: asPlayer, f: freeView,
       c: () => toggle("check"), h: () => toggle("tops"), i: () => toggle("walls"), m: () => setObjects(S.objects === "a" ? "c" : "a"),
       1: () => setTool(S.tool === "rope" ? null : "rope"), 2: () => setTool(S.tool === "portal" ? null : "portal"),
-      3: () => setTool(S.tool === "landing" ? null : "landing"), 4: () => setTool(S.tool === "spawn" ? null : "spawn"), "?": () => toggleHelp() };
+      3: () => setTool(S.tool === "landing" ? null : "landing"), 4: () => setTool(S.tool === "spawn" ? null : "spawn"),
+      5: () => setTool(S.tool === "ramp" ? null : "ramp"), "?": () => toggleHelp() };
     const fn = keys[k.length === 1 ? k.toLowerCase() : k];
     if (fn) act(fn);
   };
@@ -980,7 +1190,7 @@ export async function open(api) {
   function pasteHere() {
     const pk = S.hover;
     if (!S.clip.length || !pk?.layer) { showHint(S.clip.length ? t3("pasteWhere") : t3("nothingCopied")); return; }
-    const n = api.paste ? api.paste(S.clip, pk.x, pk.z, pk.layer.floor) : 0;
+    const n = api.paste ? api.paste(S.clip, pk.x, pk.z, pk.layer.floor, refitRamp) : 0;
     showHint(n ? t3("pasted", n) : t3("nothingCopied"));
   }
   // a click on the map's own blocks (no tool armed, no marker there): the whole thing (a wall, an object, a roof: the
@@ -1114,23 +1324,33 @@ export async function open(api) {
         showHover({ x: hv[0], z: hv[1], y, cell: c, ...(l ? { layer: l, cube: null, ...CD.verdict(l) } : CD.pickAt(c, y, true)), sx, sy });
       }
     }
+    // a ramp asked by the address (pictures): ramp=x0,z0,f0,x1,z1,f1 shown as if being placed (rampw= its width)
+    const rq = (q.get("ramp") || "").split(",").map(Number);
+    if (rq.length === 6 && rq.every(Number.isFinite)) {
+      setTool("ramp");
+      const fl = (x, z, f) => cellAt(x, z)?.layers.find((l) => l.f === f)?.floor || "s";
+      S.ramp = { a: { x: rq[0], z: rq[1], f: rq[2], floor: fl(rq[0], rq[1], rq[2]) } };
+      previewRamp({ x: rq[3], z: rq[4], f: rq[5], floor: fl(rq[3], rq[4], rq[5]) });
+    }
     draw();
     await new Promise((r) => requestAnimationFrame(() => r()));
     root.dataset.ready = "1";
   })();
   // read-only hooks for the page's browser tests: the state, a cell's top on the screen (client pixels), the problems
-  const screenOf = (x, z, floor = "s") => {
+  const screenOf = (x, z, floor = "s", f = null) => {
     resize();
     placeCamera();
-    const c = cellAt(x, z), l = c && CD.layerFor(c, floor);
+    const c = cellAt(x, z), l = c && (f != null ? c.layers.find((q) => q.f === f) : CD.layerFor(c, floor));
     if (!l) return null;
     const v = new THREE.Vector3(x, l.f, -z).project(camera), r = canvas.getBoundingClientRect();
     return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height, floor: l.floor, stand: l.stand };
   };
-  window.__v3d = { ready, state: () => ({ ...S, moving: held.size, hover: null, asset: S.asset ? { kind: S.asset.kind, n: S.asset.cubes.length } : null, chunks: chunks.size, problems: problems.problems.map((p) => ({ ...p })) }), pick, screenOf };
+  window.__v3d = { ready, state: () => ({ ...S, moving: held.size, hover: null, asset: S.asset ? { kind: S.asset.kind, n: S.asset.cubes.length } : null, chunks: chunks.size, problems: problems.problems.map((p) => ({ ...p })),
+    ramp: S.ramp ? { a: S.ramp.a, b: S.ramp.b || null, ok: S.ramp.walk?.ok ?? null, reasons: S.ramp.walk?.reasons || [] } : null,
+    ramps: rampDraw.map(([m, plan, walk]) => ({ id: m.id, rise: plan.rise, run: plan.run, width: plan.width, ok: walk?.ok ?? null, reasons: walk?.reasons || [] })) }), pick, screenOf };
 
   return {
-    refresh() { paintMarkers(); },
+    refresh() { paintMarkers(); paintPlace(); },   // (the Place card: a selected ramp's width)
     show() { root.hidden = false; update(); },
     hide() { root.hidden = true; showHover(null); },
     goTo(x, z) { goTo(x, z); },

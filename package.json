@@ -1,5 +1,5 @@
 {
  "private": true,
  "type": "module",
- "scripts": {"test": "node --test tests/maplink.test.mjs tests/ui.test.mjs tests/review.test.mjs tests/draft.test.mjs tests/map3d.test.mjs", "e2e3d": "node tests/map3d.e2e.mjs"}
+ "scripts": {"test": "node --test tests/maplink.test.mjs tests/ui.test.mjs tests/review.test.mjs tests/draft.test.mjs tests/map3d.test.mjs tests/ramp.test.mjs", "e2e3d": "node tests/map3d.e2e.mjs"}
 }

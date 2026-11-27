@@ -497,6 +497,9 @@ body:not(.v3d) #view3d { display: none; }
 .v3d-hint { position: absolute; top: 62px; left: 50%; transform: translateX(-50%); z-index: 3; background: #2a2412f2; color: #f5d68a;
             border: 1px solid #5a4a1a; border-radius: 9px; padding: 5px 12px; font-size: 13px; max-width: calc(100% - 32px); }
 .v3d-hint[hidden] { display: none; }
+/* a ramp's check in the hint: green when it walks both ways, red with its reason */
+.v3d-hint[data-level="ok"] { background: #12301ef2; color: #8ee6ad; border-color: #30c46c; }
+.v3d-hint[data-level="bad"] { background: #3a1416f2; color: #ffb3b5; border-color: #e5484d; }
 .v3d-floors { left: 10px; top: 64px; width: 132px; display: flex; flex-direction: column; gap: 1px; max-height: min(260px, calc(100% - 340px)); overflow: auto; scrollbar-width: thin; }
 .v3d-floors button { text-align: left; display: flex; justify-content: space-between; align-items: center; }
 .v3d-floors .dot { color: #fff; font-size: 9px; }

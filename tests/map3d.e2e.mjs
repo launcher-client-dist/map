@@ -250,6 +250,101 @@ try {
   await key("ArrowUp", "ArrowUp", 38);
   assert.notEqual((await js("window.__v3d.state()")).floor, f1.floor, "the focused slider's arrow key steps a floor");
   await shot("sliders_dragged.png");
+
+  // a ramp by clicks: the Ramp tool (5), the low end on the ground by a rope's landing, the high end up on the deck 5
+  // cubes over it (6 cells east): the check walks it both ways (green); the link holds it; copy/paste; undo / redo
+  await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=-259,178&zoom=0.8&yaw=180&pitch=45` });
+  let rampUp = false;
+  for (let i = 0; i < 120 && !rampUp; i++) {
+    await sleep(500);
+    try {
+      const r = await cdp("Runtime.evaluate", { returnByValue: true, expression: `(() => { const v = window.__v3d; return !!(v && document.querySelector("#view3d")?.dataset.ready === "1" && v.state().chunks > 0); })()` });
+      rampUp = r.result?.value === true;
+    } catch { /* (between two documents) */ }
+  }
+  assert.ok(rampUp, "the 3D view opened again for the ramp");
+  await sleep(1500);
+  await key("5", "Digit5", 53);
+  assert.equal((await js("window.__v3d.state()")).tool, "ramp", "5 arms the Ramp tool");
+  const lo = await js(`window.__v3d.screenOf(-262, 178, "s", -3)`);
+  assert.ok(lo, "the low end is on the screen");
+  await clickAt(lo.x, lo.y);
+  const ra = (await js("window.__v3d.state()")).ramp;
+  assert.deepEqual(ra && [ra.a.x, ra.a.z, ra.a.f], [-262, 178, -3], "the first click: the low end " + JSON.stringify(ra));
+  const hi = await js(`window.__v3d.screenOf(-256, 178, "s", 2)`);
+  assert.ok(hi, "the high end is on the screen");
+  await moveTo(hi.x, hi.y);
+  await sleep(200);
+  const rb = (await js("window.__v3d.state()")).ramp;
+  assert.ok(rb && rb.b && rb.b.x === -256 && rb.b.z === 178 && rb.b.f === 2 && rb.ok === true, "the preview walks both ways: " + JSON.stringify(rb));
+  assert.match(await js(`document.querySelector(".v3d-hint").textContent`), /Ramp \+5 over 6 cells: walks up and back down/);
+  await shot("ramp_preview.png");
+  await clickAt(hi.x, hi.y);
+  await sleep(700);   // (the address bar is written 400 ms after an edit)
+  const st1 = await js("window.__state()");
+  const ramp = st1.markers.find((m) => m.kind === "ramp");
+  assert.ok(ramp, "a ramp was placed: " + JSON.stringify(st1.markers));
+  assert.deepEqual([ramp.points, ramp.floor, ramp.fields.lo, ramp.fields.hi, ramp.fields.width], [[[-262, 178], [-256, 178]], "s", -3, 2, 2]);
+  assert.match(ramp.fields.pieces, /^E2\|/);
+  const placed = (await js("window.__v3d.state()")).ramps;
+  assert.ok(placed.length === 1 && placed[0].ok === true, "the placed ramp walks: " + JSON.stringify(placed));
+  assert.ok(!(await js("window.__v3d.state()")).problems.some((p) => p.kind === "ramp"), "no ramp problem");
+  // the link round trip: the address bar's fragment decodes to the same ramp
+  const rdec = (await decode(await js("location.hash"))).markers.find((m) => m.kind === "ramp");
+  assert.deepEqual(rdec, ramp, "the link holds the ramp");
+  await shot("ramp_placed.png");
+  // copy / paste: the ramp selected by a click on it (the tool off), Ctrl+C, the cursor 3 cells north, Ctrl+V
+  await key("5", "Digit5", 53);
+  const mid = await js(`window.__v3d.screenOf(-262, 178, "s", -3)`);
+  await clickAt(mid.x, mid.y);
+  assert.equal((await js("window.__state()")).selected, ramp.id, "a click on the ramp selects it");
+  // the selected ramp's width: 3 plans it again 3 wide (one undo step)
+  await js(`document.querySelector('[data-rampw="3"]').click()`);
+  await sleep(300);
+  const wide3 = (await js("window.__state()")).markers.find((m) => m.id === ramp.id);
+  assert.ok(wide3.fields.width === 3 && /^E3\|/.test(wide3.fields.pieces), "width 3 on the selected ramp: " + JSON.stringify(wide3.fields));
+  // (3 wide, its third lane runs along the pit's south wall: the check, run again, says so)
+  const chk3 = (await js("window.__v3d.state()")).ramps.find((r) => r.id === ramp.id);
+  assert.ok(chk3 && chk3.width === 3 && chk3.ok !== null, "the check ran again 3 wide: " + JSON.stringify(chk3));
+  console.log("ramp 3 wide:", chk3.ok ? "walks" : "red: " + JSON.stringify(chk3.reasons));
+  await key("z", "KeyZ", 90, 2);
+  assert.equal((await js("window.__state()")).markers.find((m) => m.id === ramp.id).fields.width, 2, "undo: 2 wide again");
+  await key("c", "KeyC", 67, 2);
+  const north = await js(`window.__v3d.screenOf(-259, 181)`);
+  await moveTo(north.x, north.y);
+  await key("v", "KeyV", 86, 2);
+  await sleep(500);
+  const ramps2 = (await js("window.__state()")).markers.filter((m) => m.kind === "ramp");
+  assert.equal(ramps2.length, 2, "a pasted ramp: " + JSON.stringify(ramps2));
+  const copyR = ramps2.find((m) => m.id !== ramp.id);
+  assert.ok(copyR.points[0][1] !== 178 && /^[NESW][123]\|/.test(copyR.fields.pieces), "the copy moved, its pieces planned there: " + JSON.stringify(copyR));
+  // undo takes the paste back, redo brings it again
+  await key("z", "KeyZ", 90, 2);
+  assert.equal((await js("window.__state()")).markers.filter((m) => m.kind === "ramp").length, 1, "undo");
+  await key("y", "KeyY", 89, 2);
+  assert.equal((await js("window.__state()")).markers.filter((m) => m.kind === "ramp").length, 2, "redo");
+  // a drag places one too: the tool on, pressed on the low end, moved, released on the high end (the view doesn't pan)
+  await key("Escape", "Escape", 27);
+  await key("5", "Digit5", 53);
+  const nRamps = (await js("window.__state()")).markers.filter((m) => m.kind === "ramp").length;
+  const v0 = await js("window.__v3d.state()");
+  const dlo = await js(`window.__v3d.screenOf(-262, 179, "s", -3)`), dhi = await js(`window.__v3d.screenOf(-256, 179, "s", 2)`);
+  assert.ok(dlo && dhi, "the drag's ends are on the screen");
+  await cdp("Input.dispatchMouseEvent", { type: "mouseMoved", x: dlo.x, y: dlo.y });
+  await cdp("Input.dispatchMouseEvent", { type: "mousePressed", x: dlo.x, y: dlo.y, button: "left", buttons: 1, clickCount: 1 });
+  for (let k = 1; k <= 8; k++) {
+    await cdp("Input.dispatchMouseEvent", { type: "mouseMoved", x: dlo.x + ((dhi.x - dlo.x) * k) / 8, y: dlo.y + ((dhi.y - dlo.y) * k) / 8, button: "left", buttons: 1 });
+    await sleep(40);
+  }
+  await cdp("Input.dispatchMouseEvent", { type: "mouseReleased", x: dhi.x, y: dhi.y, button: "left", buttons: 0, clickCount: 1 });
+  await sleep(500);
+  const dragged = (await js("window.__state()")).markers.filter((m) => m.kind === "ramp");
+  assert.equal(dragged.length, nRamps + 1, "a drag placed a ramp: " + JSON.stringify(dragged));
+  const dr = dragged.find((m) => m.points[0][1] === 179 && m.points[1][1] === 179);
+  assert.ok(dr && dr.points[0][0] === -262 && dr.points[1][0] === -256 && dr.fields.lo === -3 && dr.fields.hi === 2, "the dragged ramp's ends: " + JSON.stringify(dr));
+  const v1 = await js("window.__v3d.state()");
+  assert.ok(v1.x === v0.x && v1.z === v0.z, "the view did not pan while drawing the ramp");
+  console.log("ramp: placed by clicks and by a drag, green, in the link, width on a selected ramp, copy/paste, undo/redo");
   console.log("main flow passed", new Date().toISOString());
   // one view on DevTools' "Fast 3G" network (562.5 ms latency, ~180 KB/s down), the cache off, as a first visit: how
   // long until every chunk in view is drawn (the page, three.js, the data); a number for the report, not a limit
@@ -275,7 +370,7 @@ try {
   await cdp("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
   assert.ok(loaded, "the view loaded on Fast 3G");
   console.log(`fast 3G: one view (the street, look ${loaded.look}, ${loaded.chunks} chunks) drawn in ${(ms3g / 1000).toFixed(1)} s, ${(netBytes / 1e6).toFixed(2)} MB over the network`);
-  console.log("ok: rope post + landing placed by clicks, a spawn in the canal flagged red, the link round trip holds them; copy/paste, whole roof / one block, the keys; W A S D move along the view's heading; the floor and cut sliders held while dragged");
+  console.log("ok: a ramp placed by clicks walks green and round trips; rope post + landing placed by clicks, a spawn in the canal flagged red, the link round trip holds them; copy/paste, whole roof / one block, the keys; W A S D move along the view's heading; the floor and cut sliders held while dragged");
 } catch (e) {
   failed = true;
   console.error("FAIL", e);

@@ -111,6 +111,10 @@ export const KINDS = [
   { name: "rope2", geometry: "pointdest", fields: [["label", "str"]], extra: [COMBAT, FLAG_F] },   // a two-way rope: goes and comes back
   { name: "boss", geometry: "point", fields: [["monster", "str"], ["schedule", "str"], ["label", "str"]], extra: [FLAG_F] },
   { name: "npc", geometry: "point", fields: [["name", "str"], ["schedule", "str"], ["label", "str"]], extra: [FLAG_F] },
+  // a ramp proposal (the 3D editor's Ramp): points [low end, high end]; lo, hi: the cube each end stands on (its top
+  // is the ground there); width 1..3 cells; ground: the look's ground kind (grass, dirt, sand, rock, paved, snow, wood,
+  // other); pieces: "<N|E|S|W><width>|" and each column's cube count in order (map3d/ramp.js: encodePieces)
+  { name: "ramp", geometry: "line", fields: [["label", "str"], ["lo", "int"], ["hi", "int"], ["width", "int"], ["ground", "str"], ["pieces", "str"]], extra: [FLAG_F] },
 ];
 export const KIND_CODE = Object.fromEntries(KINDS.map((k, i) => [k.name, i]));
 // The colours an area or a portal can wear, by the index the color field holds (append only; 0 is never written: no

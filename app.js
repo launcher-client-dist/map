@@ -44,6 +44,9 @@ const KIND_UI = {
   // an NPC: who, when (free text) under the name, what it sells or does
   npc: { color: "#5e7d1f", svg: svg('<circle cx="8" cy="4.8" r="2.6"/><path d="M3 14.5c0-3 2.2-5.2 5-5.2s5 2.2 5 5.2"/>'),
     fields: { name: { input: "text" }, schedule: { input: "schedule" }, label: { input: "text", word: "field.npcLabel" } } },
+  // a ramp (placed in the 3D view, where the heights are): an arrow from its low end up to its high end
+  ramp: { color: "#b8860b", svg: svg('<path d="M1.8 13.5h12.4"/><path d="M2.5 13.5 13.5 5.5v8"/><path d="M5.2 7.6 9.2 4.8M7.2 4.6l2 .2-.4 2"/>'),
+    fields: { label: { input: "text" } } },
 };
 // the map things: on a phone one menu ("Objects", the ＋), each kind with its icon, name and one line; on a computer
 // listed in the tool rail (the two-way rope from a rope's panel)
@@ -541,7 +544,14 @@ function labelOf(m) {
   if (m.kind === "spawn") return [f.monster || "?", f.count > 1 ? "×" + f.count : ""].join(" ").trim();
   if (m.kind === "boss") return f.monster || "?";
   if (m.kind === "npc") return f.name || f.label || "";
+  if (m.kind === "ramp") return [f.label, rampRise(m)].filter(Boolean).join(" ");
   return f.label || f.text || "";
+}
+
+// a ramp's climb in words ("+3"): its high end's cube over its low end's
+function rampRise(m) {
+  const f = m.fields || {};
+  return Number.isFinite(+f.lo) && Number.isFinite(+f.hi) && f.lo !== "" && f.hi !== "" ? "+" + (+f.hi - +f.lo) : "";
 }
 
 // a boss's or an NPC's label on the map: its name, its own label, and when it is there on a line under them
@@ -819,7 +829,12 @@ function drawMarker(p, m, ledge = false) {
       dashArray: m.locked ? "6 6" : null, interactive: tool === "select" || tool === "movegroup" }).on("click", pick).addTo(p.layer);
     const [x1, z1] = m.points[m.points.length - 1];
     L.circleMarker(ll(m.points[0][0], m.points[0][1]), { radius: 5, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
-    L.circleMarker(ll(x1, z1), { radius: 7, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
+    if (m.kind === "ramp" && m.points.length >= 2) {
+      // a ramp: an arrow head at its high end (it points up the ramp)
+      const [x0, z0] = m.points[0], len = Math.hypot(x1 - x0, z1 - z0) || 1, ux = (x1 - x0) / len, uz = (z1 - z0) / len, s = Math.min(1.2, len / 2);
+      const wing = (side) => ll(x1 - ux * s + side * uz * s * 0.7, z1 - uz * s - side * ux * s * 0.7);
+      L.polyline([wing(1), ll(x1, z1), wing(-1)], { color: sel ? "#ffe066" : flagged ? FLAG_RED : k.color, weight: sel || flagged ? 5 : 4, interactive: false }).addTo(p.layer);
+    } else L.circleMarker(ll(x1, z1), { radius: 7, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
     const shown = labelShown(p, m) || flagged;
     if (labelOf(m) || flagged) tip(line, withFlag(m, (m.locked ? "🔒 " : "") + labelOf(m)), { direction: "center", offset: [0, 0], permanent: shown, sticky: !shown });
     if (m.id === selected && !multi.size && canEdit(m)) {
@@ -1406,6 +1421,12 @@ function renderPanel() {
     body.append(el("label", { class: "check" }, two, t("field.twoWay")));
   }
   if (leads(m.kind)) destSection(body, m, editable);
+  if (m.kind === "ramp") {
+    // what it climbs (set in the 3D view, where the heights are: moved or changed there)
+    const f = m.fields || {}, [p0, p1] = m.points || [];
+    const run = p0 && p1 ? Math.max(Math.abs(p1[0] - p0[0]), Math.abs(p1[1] - p0[1])) : 0;
+    body.append(el("div", { class: "note", "data-act": "ramp-info" }, t("rampInfo", rampRise(m) || "?", run, +f.width || 1, f.ground ? t("ground." + f.ground) : "?")));
+  }
   if (m.kind === "spawn") spawnFields(body, m, editable);
   else for (const [name, f] of Object.entries(k.fields)) {
     body.append(el("label", {}, fieldWord(m.kind, name)));
@@ -2228,9 +2249,26 @@ function place3d(kind, x, z, floor) {
   });
   return id;
 }
+// the 3D view's ramp: its two ends (low, high) and its fields (map3d/ramp.js fieldsOfPlan); one undo step, selected
+function placeRamp3d(points, floor, fields) {
+  let id = null;
+  if (mode !== "edit") return null;
+  commit(() => {
+    const m = newMarker("ramp", floor, { points });
+    Object.assign(m.fields, fields);
+    markers.push(m);
+    selected = id = m.id;
+  });
+  return id;
+}
+// a change the 3D view makes to one marker (a ramp's width): one undo step
+function edit3d(id, fn) {
+  if (mode !== "edit") return;
+  commit(() => { const m = byId(id); if (!m || !canEdit(m)) return false; fn(m); });
+}
 // the 3D view's paste: copies of the markers (taken when copied), their middle at (x, z), on that floor (a destination on
 // their own floor goes along); one undo step, the copies selected
-function paste3d(list, x, z, floor) {
+function paste3d(list, x, z, floor, fit = (m) => m) {
   if (mode !== "edit" || !list.length) return 0;
   let n = 0;
   commit(() => {
@@ -2239,7 +2277,7 @@ function paste3d(list, x, z, floor) {
     nextId = next;
     multi.clear();
     for (const c of copies) {
-      const m = c.floor === floor ? c : ED.onFloor(c, floor);
+      const m = fit(c.floor === floor ? c : ED.onFloor(c, floor));   // (a ramp: on the ground where it lands)
       markers.push(m);
       multi.add(m.id);
     }
@@ -2265,7 +2303,7 @@ async function setView(v) {
     host: $("mapArea"), lang, t, params: new URLSearchParams(location.search), tileVersion,
     start: { x: Math.round(c.lng), z: Math.round(c.lat), floor: p.floor },
     markers: () => markers, selected: () => selected, select: (id) => { selected = id; refresh(); },
-    place: place3d, setDest: (id, x, z, floor) => setDest(id, x, z, floor), paste: paste3d,
+    place: place3d, setDest: (id, x, z, floor) => setDest(id, x, z, floor), paste: paste3d, placeRamp: placeRamp3d, edit: edit3d,
     selectedIds: () => (multi.size ? [...multi] : selected != null ? [selected] : []),
     colorOf, labelOf, showCell,
   }));

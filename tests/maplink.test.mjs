@@ -149,7 +149,7 @@ test("map things round trip, with and without a destination", async () => {
   const s = await decode(await encode(things));
   assert.deepEqual(s.markers, things.markers);
   assert.ok(!("dest" in s.markers[2]));
-  assert.deepEqual(KINDS.slice(5).map((k) => k.name), ["rope", "lever", "hole", "door", "portal", "elevator", "rope2", "boss", "npc"]);
+  assert.deepEqual(KINDS.slice(5).map((k) => k.name), ["rope", "lever", "hole", "door", "portal", "elevator", "rope2", "boss", "npc", "ramp"]);
   assert.deepEqual(KINDS.slice(0, 5).map((k) => k.name), ["spawn", "poi", "area", "route", "note"]);   // never reordered
   // an elevator leads to another floor like a rope
   const lift = { view: { floors: ["s"] }, markers: [{ id: 0, kind: "elevator", floor: "-2", locked: false, x: 4, z: 4, dest: { x: 4, z: 4, floor: "3" }, fields: { label: "elevador" } }] };
@@ -345,7 +345,7 @@ const later = {
 };
 
 test("a two-way rope, a boss and an NPC: kinds 11..13, round trip in both formats", async () => {
-  assert.deepEqual(KINDS.slice(CORE_KINDS).map((k) => k.name), ["rope2", "boss", "npc"]);
+  assert.deepEqual(KINDS.slice(CORE_KINDS).map((k) => k.name), ["rope2", "boss", "npc", "ramp"]);
   assert.deepEqual((await decode(await encode(later))).markers, later.markers);
   const v1 = "1." + Buffer.from(deflateRawSync(payloadOf(later, 1))).toString("base64url");
   assert.deepEqual((await decode(v1)).markers, later.markers);
@@ -360,6 +360,24 @@ test("a rope made two-way (or one-way) is its own change", async () => {
   const saved = await decode(await encode(saveState(opened, m, opened.view, opened.tiles, 5)));
   assert.deepEqual(changes(saved).map((c) => [c.op, c.id, c.from?.toString() ?? null]),
     [["kind", 0, "rope2"], ["kind", 1, "rope"], ["moved", 1, "30,30"]]);
+});
+
+// ------------------------------------------------------------------------------------------------ ramp (kind 14)
+test("a ramp: kind 14, its ends, width, ground and pieces round trip in both formats, moved and changed", async () => {
+  const s = { tiles: "0.2.1", view: { x: 0, z: 0, zoom: 2, floors: ["s"] }, markers: [
+    { id: 0, kind: "ramp", floor: "s", locked: false, points: [[-240, 183], [-236, 183]], fields: { label: "rampa", lo: -5, hi: -2, width: 2, ground: "paved", pieces: "E2|1,1,2,2,3,3" } },
+    { id: 1, kind: "ramp", floor: "-4", locked: false, points: [[5, 5], [5, 9]], fields: { lo: -7, hi: -4, width: 1, ground: "rock", pieces: "N1|0,1,2" } },
+  ] };
+  assert.equal(KIND_CODE.ramp, 14);
+  assert.deepEqual((await decode(await encode(s))).markers, s.markers);
+  const v1 = "1." + Buffer.from(deflateRawSync(payloadOf(s, 1))).toString("base64url");
+  assert.deepEqual((await decode(v1)).markers, s.markers);
+  const opened = await decode(await encode(s));
+  const m = structuredClone(opened.markers);
+  m[0].points = m[0].points.map(([x, z]) => [x + 2, z]);
+  m[1].fields.width = 2;
+  const saved = await decode(await encode(saveState(opened, m, opened.view, opened.tiles, 2)));
+  assert.deepEqual(changes(saved).map((c) => [c.op, c.id]), [["moved", 0], ["edited", 1]]);
 });
 
 // ------------------------------------------------------------------------------------------------ schedules, bosses
