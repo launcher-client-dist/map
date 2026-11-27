@@ -35,7 +35,7 @@ const dbg = 9300 + Math.floor(Math.random() * 500);
 const browser = spawn(BROWSER, ["--headless=new", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", `--remote-debugging-port=${dbg}`,
   `--user-data-dir=${profile}`, "--window-size=1440,900", "--no-first-run", "about:blank"], { stdio: "ignore" });
 
-let ws, seq = 0;
+let ws, seq = 0, netBytes = 0;
 const waiting = new Map();
 function cdp(method, params = {}) {
   const id = ++seq;
@@ -83,6 +83,9 @@ try {
     const m = JSON.parse(e.data);
     if (m.method === "Runtime.exceptionThrown") console.error("page:", m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text);
     if (m.method === "Runtime.consoleAPICalled" && ["error", "warning"].includes(m.params.type)) console.error("page " + m.params.type + ":", m.params.args.map((a) => a.value ?? a.description).join(" "));
+    if (m.method === "Network.loadingFinished") netBytes += m.params.encodedDataLength || 0;
+    // (leaving a page with edits not shared asks first: the test says yes)
+    if (m.method === "Page.javascriptDialogOpening") cdp("Page.handleJavaScriptDialog", { accept: true }).catch(() => {});
     if (m.id && waiting.has(m.id)) { const w = waiting.get(m.id); waiting.delete(m.id); m.error ? w.no(new Error(m.error.message)) : w.ok(m.result); }
   });
   await cdp("Page.enable");
@@ -247,6 +250,31 @@ try {
   await key("ArrowUp", "ArrowUp", 38);
   assert.notEqual((await js("window.__v3d.state()")).floor, f1.floor, "the focused slider's arrow key steps a floor");
   await shot("sliders_dragged.png");
+  console.log("main flow passed", new Date().toISOString());
+  // one view on DevTools' "Fast 3G" network (562.5 ms latency, ~180 KB/s down), the cache off, as a first visit: how
+  // long until every chunk in view is drawn (the page, three.js, the data); a number for the report, not a limit
+  await cdp("Network.enable");
+  await cdp("Network.setCacheDisabled", { cacheDisabled: true });
+  await cdp("Network.emulateNetworkConditions", { offline: false, latency: 562.5, downloadThroughput: 180000, uploadThroughput: 84375 });
+  netBytes = 0;
+  console.log("fast 3G: navigating", new Date().toISOString());
+  const t3g = Date.now();
+  await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=-234,175` });
+  // (short checks from here, one a second: a long evaluate would die with the page the navigation replaces)
+  let loaded = null;
+  for (let i = 0; i < 300 && !loaded; i++) {
+    await sleep(1000);
+    try {
+      const r = await cdp("Runtime.evaluate", { returnByValue: true, expression: `(() => { const v = window.__v3d, st = document.querySelector(".v3d-status");
+        return v && v.state().chunks > 0 && st && st.hidden ? { chunks: v.state().chunks, look: v.state().look } : null; })()` });
+      loaded = r.result?.value || null;
+    } catch { /* (the page between two documents) */ }
+    if (i % 15 === 14) console.log(`fast 3G: ${i + 1} s, ${(netBytes / 1e6).toFixed(2)} MB so far`);
+  }
+  const ms3g = Date.now() - t3g;
+  await cdp("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  assert.ok(loaded, "the view loaded on Fast 3G");
+  console.log(`fast 3G: one view (the street, look ${loaded.look}, ${loaded.chunks} chunks) drawn in ${(ms3g / 1000).toFixed(1)} s, ${(netBytes / 1e6).toFixed(2)} MB over the network`);
   console.log("ok: rope post + landing placed by clicks, a spawn in the canal flagged red, the link round trip holds them; copy/paste, whole roof / one block, the keys; W A S D move along the view's heading; the floor and cut sliders held while dragged");
 } catch (e) {
   failed = true;

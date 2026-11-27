@@ -179,7 +179,19 @@ test("the data: every chunk decodes; the street's canal and house say why", { sk
   assert.deepEqual(meta.kinds, CD.KINDS);
   assert.deepEqual(meta.bad, CD.BAD);
   assert.deepEqual(meta.warn, CD.WARN);
-  assert.ok(!meta.b, "the public data has no Simplified ground");
+  // the Simplified ground: every chunk listed has its file, it parses, the ground comes first and every vertex sits on
+  // its chunk (a little over its edges: a mesh's border)
+  for (const [a, b] of meta.b || []) {
+    const g = parseGlb(read(`b/${a}_${b}.glb.gz`));
+    assert.equal(g.prims[0].material, "ground", `${a}_${b}`);
+    for (const p of g.prims) {
+      assert.equal(p.index.array.length % 3, 0);
+      for (const i of [0, p.position.count >> 1, p.position.count - 1]) {
+        const [x, , z] = vertexOf(g, p, i);
+        assert.ok(Math.abs(x - 16 * a) < 26 && Math.abs(z - 16 * b) < 26, `${a}_${b}: a vertex at ${x}, ${z}`);
+      }
+    }
+  }
   const ext = meta.gz ? ".bin.gz" : ".bin";
   const real = new Map();
   for (const [a, b] of meta.chunks) {

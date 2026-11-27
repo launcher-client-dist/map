@@ -51,7 +51,9 @@ export async function open(api) {
   try { meta = await (await fetch(new URL("meta.json", BASE))).json(); }
   catch { root.append(h("div", { class: "v3d-msg" }, t3("noData"))); return { refresh() {}, show() {}, hide() { root.hidden = true; }, goTo() {} }; }
   // the Simplified ground (the game's own ground meshes, map3d/b): local data only for now, never in the public files
-  const hasB = !!meta.b;
+  // the Simplified ground (the game's ground meshes, flat colours, map3d/b): the chunks that have one, listed by the data
+  const bSet = new Set((Array.isArray(meta.b) ? meta.b : []).map(([a, b]) => a + "_" + b));
+  const hasB = bSet.size > 0;
   const chunkSet = new Set(meta.chunks.map(([a, b]) => a + "_" + b));
 
   // ---- state
@@ -131,11 +133,12 @@ export async function open(api) {
       paintStatus();
       ch.ready = Promise.all([
         fetch(new URL(`c/${key}.bin${meta.gz ? ".gz" : ""}`, BASE)).then((r) => (r.ok ? r.arrayBuffer() : null)).then(unpack),
-        hasB ? fetch(new URL(`b/${key}.glb`, BASE)).then((r) => (r.ok ? r.arrayBuffer() : null)) : null,
+        bSet.has(key) ? fetch(new URL(`b/${key}.glb.gz`, BASE)).then((r) => (r.ok ? r.arrayBuffer() : null)).then(unpack) : null,
       ]).then(([cb, gb]) => {
         if (!chunks.has(key)) return;
         if (cb) { ch.c = CD.decodeChunk(cb); ch.cMesh = buildC(ch.c); ch.wMesh = buildWalls(ch.c); ch.tMesh = buildTops(ch.c); layersC.add(ch.cMesh); wallsG.add(ch.wMesh); topsG.add(ch.tMesh); }
         if (gb) { ch.bMesh = buildB(parseGlb(gb)); layersB.add(ch.bMesh); }
+        syncGround(ch);
       }).catch((e) => console.warn("map3d", key, e)).finally(() => { surfaceMemo.clear(); loadingN--; paintStatus(); paintFloors(); paintMarkers(); draw(); });
     }
     // far chunks go (memory)
@@ -145,6 +148,14 @@ export async function open(api) {
       for (const m of [ch.bMesh, ch.cMesh, ch.wMesh, ch.tMesh]) if (m) { m.parent?.remove(m); m.traverse((o) => o.geometry?.dispose()); }
       chunks.delete(key);
     }
+  }
+
+  // Simplified: each chunk draws its game ground where it has one, its blocks where it hasn't (no holes in the view)
+  function syncGround(ch) { if (ch.cMesh) ch.cMesh.visible = S.look === "c" || !ch.bMesh; }
+  // what a pointer hits: the ground shown (the Simplified meshes, and the blocks of the chunks without them)
+  function groundTargets() {
+    if (S.look !== "b") return [layersC];
+    return [layersB, ...[...chunks.values()].filter((ch) => ch.cMesh && !ch.bMesh).map((ch) => ch.cMesh)];
   }
 
   function buildB(g) {
@@ -786,7 +797,7 @@ export async function open(api) {
     const r = canvas.getBoundingClientRect();
     const v = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(v, camera);
-    const targets = [S.look === "b" ? layersB : layersC];
+    const targets = groundTargets();
     let hits = ray.intersectObjects(targets, true);
     const cy = cutY();
     // (the props are shapes, not the ground a player stands on: the pick goes through them; what blocks is in the
@@ -1030,7 +1041,8 @@ export async function open(api) {
 
   function applyLook() {
     layersB.visible = S.look === "b";
-    layersC.visible = S.look === "c";
+    layersC.visible = true;
+    for (const ch of chunks.values()) syncGround(ch);
     wallsG.visible = S.walls;
     topsG.visible = S.tops;
     xray.visible = S.check;
