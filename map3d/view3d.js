@@ -553,7 +553,15 @@ export async function open(api) {
   const status = h("div", { class: "v3d-status", hidden: true });
   const pinLayer = h("div", { class: "v3d-pins" });
   const helpBox = h("div", { class: "v3d-help", hidden: true, role: "dialog", "aria-label": t3("helpTitle") });
-  root.append(pinLayer, h("div", { class: "v3d-top" }, lookBox, camBox), hint, floorBox, probBox, miniBox, placeBox, tipBox, status, helpBox);
+  const topRow = h("div", { class: "v3d-top" }, lookBox, camBox);
+  root.append(pinLayer, topRow, hint, floorBox, probBox, miniBox, placeBox, tipBox, status, helpBox);
+  // (a narrow view wraps the top cards onto two rows: the floor card and the hint go under them)
+  function placeCards() {
+    const below = topRow.offsetTop + topRow.offsetHeight + 8;
+    floorBox.style.top = below + "px";
+    hint.style.top = below + "px";
+    helpBox.style.top = below + "px";
+  }
 
   function paintStatus() { status.hidden = loadingN === 0; status.textContent = t3("loading"); root.dataset.ready = loadingN === 0 && chunks.size ? "1" : "0"; }
 
@@ -963,6 +971,7 @@ export async function open(api) {
   function frame() {
     raf = 0;
     resize();
+    placeCards();
     placeCamera();
     renderer.render(scene, camera);
     // the problems' numbered pins over the canvas
