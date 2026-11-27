@@ -87,8 +87,15 @@ test("red with the reason: too steep, too long, blocked, an end in the water, bu
   assert.equal(steep.walks.length, 0);
   const long = RP.planRamp({ x: -20, z: 0, f: -5 }, { x: 5, z: 0, f: -3 }, 1, W.cellAt);
   assert.ok(long.problems.some((p) => p.code === "tooLong"));
-  // a wall standing in the run (2 cubes over the street)
-  const B = street().cube(2, 0, -4).cube(2, 0, -3);
+  // a wall standing in the run
+  // (a low one the planner climbs over: the slope cells start earlier, on it; a tall one blocks)
+  const Low = street().cube(2, 0, -4).cube(2, 0, -3);
+  const low = RP.planRamp({ x: 0, z: 0, f: -5 }, { x: 5, z: 0, f: -3 }, 1, Low.cellAt);
+  assert.equal(low.first, 1);
+  assert.equal(RP.encodePieces(low), "E1|1,1,2,2|1");
+  assert.ok(RP.walkRamp(low, Low.cellAt, Low.layerAt).ok);
+  assert.deepEqual(RP.decodePieces("E1|1,1,2,2|1", low.lo, low.hi).cols, low.cols);
+  const B = street().cube(2, 0, -4).cube(2, 0, -3).cube(2, 0, -2).cube(2, 0, -1);
   const blocked = RP.walkRamp(RP.planRamp({ x: 0, z: 0, f: -5 }, { x: 5, z: 0, f: -3 }, 1, B.cellAt), B.cellAt, B.layerAt);
   assert.ok(!blocked.ok && !blocked.up);
   assert.deepEqual(blocked.reasons.map((r) => [r.code, r.x, r.z]), [["blocked", 2, 0]]);

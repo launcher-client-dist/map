@@ -500,6 +500,8 @@ body:not(.v3d) #view3d { display: none; }
 /* a ramp's check in the hint: green when it walks both ways, red with its reason */
 .v3d-hint[data-level="ok"] { background: #12301ef2; color: #8ee6ad; border-color: #30c46c; }
 .v3d-hint[data-level="bad"] { background: #3a1416f2; color: #ffb3b5; border-color: #e5484d; }
+/* the hint's offer (a bridge whose banks differ: make the ramp it needs) */
+.v3d-hint .v3d-offer { margin-left: 6px; font: inherit; font-weight: 600; color: inherit; background: #ffffff1f; border: 1px solid currentColor; border-radius: 6px; padding: 1px 8px; cursor: pointer; }
 .v3d-floors { left: 10px; top: 64px; width: 132px; display: flex; flex-direction: column; gap: 1px; max-height: min(260px, calc(100% - 340px)); overflow: auto; scrollbar-width: thin; }
 .v3d-floors button { text-align: left; display: flex; justify-content: space-between; align-items: center; }
 .v3d-floors .dot { color: #fff; font-size: 9px; }

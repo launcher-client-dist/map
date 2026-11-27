@@ -115,6 +115,10 @@ export const KINDS = [
   // is the ground there); width 1..3 cells; ground: the look's ground kind (grass, dirt, sand, rock, paved, snow, wood,
   // other); pieces: "<N|E|S|W><width>|" and each column's cube count in order (map3d/ramp.js: encodePieces)
   { name: "ramp", geometry: "line", fields: [["label", "str"], ["lo", "int"], ["hi", "int"], ["width", "int"], ["ground", "str"], ["pieces", "str"]], extra: [FLAG_F] },
+  // a bridge proposal (the 3D editor's Bridge): points [one bank, the other]; lo, hi: the cube each bank stands on; width
+  // 1..3 (bare planks, gap filler); pieces: "<N|E|S|W>|<prefab>|<length>|<width>|<segments>": a stock bridge of the game
+  // (map3d/bridge_prefabs.json) stretched by whole segments (map3d/bridge.js: encodeBridge)
+  { name: "bridge", geometry: "line", fields: [["label", "str"], ["lo", "int"], ["hi", "int"], ["width", "int"], ["pieces", "str"]], extra: [FLAG_F] },
 ];
 export const KIND_CODE = Object.fromEntries(KINDS.map((k, i) => [k.name, i]));
 // The colours an area or a portal can wear, by the index the color field holds (append only; 0 is never written: no

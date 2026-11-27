@@ -47,6 +47,9 @@ const KIND_UI = {
   // a ramp (placed in the 3D view, where the heights are): an arrow from its low end up to its high end
   ramp: { color: "#b8860b", svg: svg('<path d="M1.8 13.5h12.4"/><path d="M2.5 13.5 13.5 5.5v8"/><path d="M5.2 7.6 9.2 4.8M7.2 4.6l2 .2-.4 2"/>'),
     fields: { label: { input: "text" } } },
+  // a bridge (placed in the 3D view): planks between its two banks
+  bridge: { color: "#8a5a2b", svg: svg('<path d="M1.5 6.5h13M1.5 10.5h13"/><path d="M4 6.5v4M7 6.5v4M10 6.5v4M13 6.5v4"/><path d="M3 10.5v3.5M13 10.5v3.5"/>'),
+    fields: { label: { input: "text" } } },
 };
 // the map things: on a phone one menu ("Objects", the ＋), each kind with its icon, name and one line; on a computer
 // listed in the tool rail (the two-way rope from a rope's panel)
@@ -545,6 +548,7 @@ function labelOf(m) {
   if (m.kind === "boss") return f.monster || "?";
   if (m.kind === "npc") return f.name || f.label || "";
   if (m.kind === "ramp") return [f.label, rampRise(m)].filter(Boolean).join(" ");
+  if (m.kind === "bridge") return f.label || "";
   return f.label || f.text || "";
 }
 
@@ -829,7 +833,16 @@ function drawMarker(p, m, ledge = false) {
       dashArray: m.locked ? "6 6" : null, interactive: tool === "select" || tool === "movegroup" }).on("click", pick).addTo(p.layer);
     const [x1, z1] = m.points[m.points.length - 1];
     L.circleMarker(ll(m.points[0][0], m.points[0][1]), { radius: 5, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
-    if (m.kind === "ramp" && m.points.length >= 2) {
+    if (m.kind === "bridge" && m.points.length >= 2) {
+      // a bridge: planks across its line, at each cell between the banks
+      const [x0, z0] = m.points[0], len = Math.hypot(x1 - x0, z1 - z0) || 1, ux = (x1 - x0) / len, uz = (z1 - z0) / len;
+      const half = Math.max(1, +m.fields?.width || 1) / 2;
+      for (let i = 1; i < Math.round(len); i++) {
+        const cx = x0 + ux * i, cz = z0 + uz * i;
+        L.polyline([ll(cx - uz * half, cz + ux * half), ll(cx + uz * half, cz - ux * half)], { color: sel ? "#ffe066" : flagged ? FLAG_RED : k.color, weight: 3, interactive: false }).addTo(p.layer);
+      }
+      L.circleMarker(ll(x1, z1), { radius: 5, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
+    } else if (m.kind === "ramp" && m.points.length >= 2) {
       // a ramp: an arrow head at its high end (it points up the ramp)
       const [x0, z0] = m.points[0], len = Math.hypot(x1 - x0, z1 - z0) || 1, ux = (x1 - x0) / len, uz = (z1 - z0) / len, s = Math.min(1.2, len / 2);
       const wing = (side) => ll(x1 - ux * s + side * uz * s * 0.7, z1 - uz * s - side * ux * s * 0.7);
@@ -1426,6 +1439,13 @@ function renderPanel() {
     const f = m.fields || {}, [p0, p1] = m.points || [];
     const run = p0 && p1 ? Math.max(Math.abs(p1[0] - p0[0]), Math.abs(p1[1] - p0[1])) : 0;
     body.append(el("div", { class: "note", "data-act": "ramp-info" }, t("rampInfo", rampRise(m) || "?", run, +f.width || 1, f.ground ? t("ground." + f.ground) : "?")));
+  }
+  if (m.kind === "bridge") {
+    // how long and wide (set in the 3D view, where the heights are)
+    const f = m.fields || {}, [p0, p1] = m.points || [];
+    const run = p0 && p1 ? Math.max(Math.abs(p1[0] - p0[0]), Math.abs(p1[1] - p0[1])) : 0;
+    const d = Number.isFinite(+f.lo) && Number.isFinite(+f.hi) && f.lo !== "" && f.hi !== "" ? +f.hi - +f.lo : 0;
+    body.append(el("div", { class: "note", "data-act": "bridge-info" }, t("bridgeInfo", run, +f.width || 1, d ? t("bridgeUneven", (d > 0 ? "+" : "") + d) : "")));
   }
   if (m.kind === "spawn") spawnFields(body, m, editable);
   else for (const [name, f] of Object.entries(k.fields)) {
@@ -2261,6 +2281,18 @@ function placeRamp3d(points, floor, fields) {
   });
   return id;
 }
+// the 3D view's bridge: its two banks and its fields (map3d/bridge.js fieldsOfBridge); one undo step, selected
+function placeBridge3d(points, floor, fields) {
+  let id = null;
+  if (mode !== "edit") return null;
+  commit(() => {
+    const m = newMarker("bridge", floor, { points });
+    Object.assign(m.fields, fields);
+    markers.push(m);
+    selected = id = m.id;
+  });
+  return id;
+}
 // a change the 3D view makes to one marker (a ramp's width): one undo step
 function edit3d(id, fn) {
   if (mode !== "edit") return;
@@ -2303,7 +2335,7 @@ async function setView(v) {
     host: $("mapArea"), lang, t, params: new URLSearchParams(location.search), tileVersion,
     start: { x: Math.round(c.lng), z: Math.round(c.lat), floor: p.floor },
     markers: () => markers, selected: () => selected, select: (id) => { selected = id; refresh(); },
-    place: place3d, setDest: (id, x, z, floor) => setDest(id, x, z, floor), paste: paste3d, placeRamp: placeRamp3d, edit: edit3d,
+    place: place3d, setDest: (id, x, z, floor) => setDest(id, x, z, floor), paste: paste3d, placeRamp: placeRamp3d, placeBridge: placeBridge3d, edit: edit3d,
     selectedIds: () => (multi.size ? [...multi] : selected != null ? [selected] : []),
     colorOf, labelOf, showCell,
   }));

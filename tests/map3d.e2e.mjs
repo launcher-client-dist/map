@@ -345,6 +345,89 @@ try {
   const v1 = await js("window.__v3d.state()");
   assert.ok(v1.x === v0.x && v1.z === v0.z, "the view did not pan while drawing the ramp");
   console.log("ramp: placed by clicks and by a drag, green, in the link, width on a selected ramp, copy/paste, undo/redo");
+
+  // a bridge by clicks: the Bridge tool (6, the swamp's stock bridge by default), one bank of the swamp channel, then the
+  // other 11 cells east: the far end snaps to the 12 cells the prefab takes (its segments of 4); it walks both ways
+  // (green); the link holds the prefab and the length; undo / redo; copy/paste
+  await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=205,-139&zoom=0.8&pitch=40` });
+  let bridgeUp = false;
+  for (let i = 0; i < 120 && !bridgeUp; i++) {
+    await sleep(500);
+    try {
+      const r = await cdp("Runtime.evaluate", { returnByValue: true, expression: `(() => { const v = window.__v3d; return !!(v && document.querySelector("#view3d")?.dataset.ready === "1" && v.state().chunks > 0); })()` });
+      bridgeUp = r.result?.value === true;
+    } catch { /* (between two documents) */ }
+  }
+  assert.ok(bridgeUp, "the 3D view opened again for the bridge");
+  await sleep(1500);
+  await key("6", "Digit6", 54);
+  assert.equal((await js("window.__v3d.state()")).tool, "bridge", "6 arms the Bridge tool");
+  const bank1 = await js(`window.__v3d.screenOf(200, -137, "s", -5)`);
+  await clickAt(bank1.x, bank1.y);
+  const ba = (await js("window.__v3d.state()")).ramp;
+  assert.ok(ba && ba.kind === "bridge" && ba.a.x === 200 && ba.a.z === -137 && ba.a.f === -5, "the first click: one bank " + JSON.stringify(ba));
+  const bank2 = await js(`window.__v3d.screenOf(211, -137, "s", -5)`);
+  await moveTo(bank2.x, bank2.y);
+  await sleep(200);
+  const bb = (await js("window.__v3d.state()")).ramp;
+  assert.ok(bb && bb.b && bb.b.x === 212 && bb.ok === true, "the preview snaps to the prefab's length and walks both ways: " + JSON.stringify(bb));
+  assert.match(await js(`document.querySelector(".v3d-hint").textContent`), /Bridge \(Swamp, logs and lamps\), 12 cells, 2 segments: walks both ways/);
+  await shot("bridge_preview.png");
+  await clickAt(bank2.x, bank2.y);
+  await sleep(700);
+  const bridge = (await js("window.__state()")).markers.find((m) => m.kind === "bridge");
+  assert.ok(bridge, "a bridge was placed");
+  assert.deepEqual([bridge.points, bridge.floor, bridge.fields.lo, bridge.fields.hi, bridge.fields.width], [[[200, -137], [212, -137]], "s", -5, -5, 1]);
+  assert.equal(bridge.fields.pieces, "E|swamp|12|1|2");
+  const bst = (await js("window.__v3d.state()")).bridges;
+  assert.ok(bst.length === 1 && bst[0].ok === true && bst[0].segments === 2 && bst[0].preset === "swamp", "the placed bridge walks: " + JSON.stringify(bst));
+  const bdec = (await decode(await js("location.hash"))).markers.find((m) => m.kind === "bridge");
+  assert.deepEqual(bdec, bridge, "the link holds the bridge");
+  await shot("bridge_placed.png");
+  // undo takes it back, redo brings it again
+  await key("z", "KeyZ", 90, 2);
+  assert.equal((await js("window.__state()")).markers.filter((m) => m.kind === "bridge").length, 0, "undo");
+  await key("y", "KeyY", 89, 2);
+  assert.equal((await js("window.__state()")).markers.filter((m) => m.kind === "bridge").length, 1, "redo");
+  // copy / paste: the bridge selected by a click on its deck (the tool off), Ctrl+C, the cursor 3 cells south (on the island), Ctrl+V:
+  // a second bridge there, planned again on that ground
+  await key("6", "Digit6", 54);
+  const deckAt = await js(`window.__v3d.screenOf(205, -137, "s", -7)`) || await js(`window.__v3d.screenOf(205, -137)`);
+  await clickAt(deckAt.x, deckAt.y);
+  assert.equal((await js("window.__state()")).selected, bridge.id, "a click on the bridge selects it");
+  await key("c", "KeyC", 67, 2);
+  const south = await js(`window.__v3d.screenOf(201, -140)`);
+  await moveTo(south.x, south.y);
+  await key("v", "KeyV", 86, 2);
+  await sleep(500);
+  const two = (await js("window.__state()")).markers.filter((m) => m.kind === "bridge");
+  assert.equal(two.length, 2, "a pasted bridge: " + JSON.stringify(two) + " at " + JSON.stringify(south) + " " + await js(`document.elementFromPoint(${south.x}, ${south.y})?.className`)
+    + " " + JSON.stringify(await js(`(() => { const p = window.__v3d.pick(${south.x}, ${south.y}); return p && { x: p.x, z: p.z, layer: p.layer && p.layer.f }; })()`)) + " hint " + await js(`document.querySelector(".v3d-hint").textContent`));
+  assert.ok(/^[NESW]\|swamp\|\d+\|1\|\d+$/.test(two.find((m) => m.id !== bridge.id).fields.pieces), "the copy planned where it landed");
+  // the prefab list: bare planks picked from it; then a bridge to the mound's top two cubes up (216, -137, -3): red,
+  // "needs a ramp", and its button starts the Ramp tool on that far bank
+  await key("Escape", "Escape", 27);
+  await key("6", "Digit6", 54);
+  await js(`(() => { const s = document.querySelector('[data-bpre]'); s.value = "plain"; s.dispatchEvent(new Event("change")); })()`);
+  assert.equal((await js("window.__v3d.state()")).bridgePrefab, "plain", "the prefab list sets the bridge");
+  await hold("d", "KeyD", 68, 700);   // (the view east, so both banks are on the screen)
+  await sleep(1500);
+  const u1 = await js(`window.__v3d.screenOf(211, -137, "s", -5)`), u2 = await js(`window.__v3d.screenOf(216, -137, "s", -3)`);
+  assert.ok(u1 && u2, "the uneven bridge's banks are on the screen");
+  await clickAt(u1.x, u1.y);
+  await clickAt(u2.x, u2.y);
+  await sleep(500);
+  const offer = await js(`(() => { const b = document.querySelector('[data-act="ramp-offer"]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, text: document.querySelector(".v3d-hint").textContent }; })()`);
+  assert.ok(offer && /needs a ramp there/.test(offer.text), "the uneven bridge offers the ramp: " + JSON.stringify(offer) + " hint " + await js(`document.querySelector(".v3d-hint").textContent`)
+    + " bridges " + JSON.stringify((await js("window.__state()")).markers.filter((m) => m.kind === "bridge").map((m) => [m.points, m.fields.lo, m.fields.hi, m.fields.pieces]))
+    + " pick2 " + JSON.stringify(await js(`(() => { const p = window.__v3d.pick(${u2.x}, ${u2.y}); return p && { x: p.x, z: p.z, f: p.layer && p.layer.f }; })()`)));
+  assert.equal(await js(`document.elementFromPoint(${offer.x}, ${offer.y})?.dataset.act`), "ramp-offer", "the button is clickable where it is");
+  await cdp("Input.dispatchMouseEvent", { type: "mousePressed", x: offer.x, y: offer.y, button: "left", clickCount: 1 });
+  await cdp("Input.dispatchMouseEvent", { type: "mouseReleased", x: offer.x, y: offer.y, button: "left", clickCount: 1 });
+  await sleep(300);
+  const afterOffer = await js("window.__v3d.state()");
+  assert.ok(afterOffer.tool === "ramp" && afterOffer.ramp && afterOffer.ramp.a.x === 216 && afterOffer.ramp.a.f === -3, "the Ramp tool starts at the far bank: " + JSON.stringify(afterOffer.ramp));
+  console.log("bridge: placed by clicks, green, in the link, undo/redo, copy/paste; the prefab list; the ramp offer");
   console.log("main flow passed", new Date().toISOString());
   // one view on DevTools' "Fast 3G" network (562.5 ms latency, ~180 KB/s down), the cache off, as a first visit: how
   // long until every chunk in view is drawn (the page, three.js, the data); a number for the report, not a limit
@@ -370,7 +453,7 @@ try {
   await cdp("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
   assert.ok(loaded, "the view loaded on Fast 3G");
   console.log(`fast 3G: one view (the street, look ${loaded.look}, ${loaded.chunks} chunks) drawn in ${(ms3g / 1000).toFixed(1)} s, ${(netBytes / 1e6).toFixed(2)} MB over the network`);
-  console.log("ok: a ramp placed by clicks walks green and round trips; rope post + landing placed by clicks, a spawn in the canal flagged red, the link round trip holds them; copy/paste, whole roof / one block, the keys; W A S D move along the view's heading; the floor and cut sliders held while dragged");
+  console.log("ok: a bridge placed by clicks walks green and round trips; a ramp placed by clicks walks green and round trips; rope post + landing placed by clicks, a spawn in the canal flagged red, the link round trip holds them; copy/paste, whole roof / one block, the keys; W A S D move along the view's heading; the floor and cut sliders held while dragged");
 } catch (e) {
   failed = true;
   console.error("FAIL", e);

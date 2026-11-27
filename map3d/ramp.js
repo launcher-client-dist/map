@@ -66,42 +66,72 @@ export function planRamp(a, b, width, cellAt) {
   if (run < 1) problems.push({ code: "tooShort" });
   if (run > MAX_RUN) problems.push({ code: "tooLong", run });
   if (rise > Math.max(0, run - 1)) problems.push({ code: "steep", rise, run, need: rise + 1 });
+  // where the slope cells go along the run: the rise's cells in a row from `first`, flat cells at the low end's height
+  // before them and at the high end's after them. The latest place by default (flat at the bottom, as most stock
+  // ramps); an earlier one when the ground there has cubes over the flat cells' tops (a mound the ramp climbs over)
+  const last = Math.max(1, run - rise);
+  let first = last, buried = Infinity;
+  for (let f0 = last; f0 >= 1; f0--) {
+    const n = columnsAt(lo, run, rise, f0, w, dx, dz, px, pz, k, cellAt).filter((c) => buries(cellAt(c.x, c.z), c.top)).length;
+    if (n < buried) { buried = n; first = f0; }
+    if (!n) break;
+  }
+  const cols = columnsAt(lo, run, rise, first, w, dx, dz, px, pz, k, cellAt);
+  return { lo, hi, dir, run, rise, width: w, ground, prefab: RAMP_PREFAB[ground], cols, problems, first, firstDefault: last };
+}
+
+// the columns of a ramp whose slope cells start at `first`
+function columnsAt(lo, run, rise, first, w, dx, dz, px, pz, k, cellAt) {
   const cols = [];
-  const first = Math.max(1, run - rise);   // the first slope cell (the cells before it are flat at the low end's height)
   for (let i = 1; i < run; i++) for (const j of lanes(w)) {
     const x = lo.x + i * dx + j * px, z = lo.z + i * dz + j * pz;
-    const slope = i >= first;
-    const top = slope ? lo.f + (i - first + 1) : lo.f;
-    const g = groundUnder(cellAt(x, z), top);
+    const { top, slope } = topAt(lo.f, rise, first, i);
+    // (a slope cell's own top cube is always the slope: a flat cube already there, a one-cube step of the ground, is
+    // replaced by it, so its ground is looked for under it)
+    const g = groundUnder(cellAt(x, z), slope ? top - 1 : top);
     cols.push({ x, z, i, j, y0: g === null ? top - 3 : g + 1, top, k: slope ? k : 0 });
   }
-  return { lo, hi, dir, run, rise, width: w, ground, prefab: RAMP_PREFAB[ground], cols, problems };
+  return cols;
+}
+// a column's top cube along the run: flat at the low end's height before `first`, then one up per slope cell, then flat
+// at the high end's
+function topAt(f, rise, first, i) {
+  if (i < first) return { top: f, slope: false };
+  if (i < first + rise) return { top: f + (i - first + 1), slope: true };
+  return { top: f + rise, slope: false };
+}
+// a solid cube in the body's room over a column's top (it would stand in the way)
+function buries(cell, top) {
+  return (cell?.cubes || []).some((c) => SOLIDISH(c.kind) && c.y > top && c.y <= top + 2);
 }
 
 // ---- the pieces in the link: "<dir><width>|" then, per column in plan order (along the run from the low end, the
 // lanes across), how many cubes it stacks (its top cube and the supports under it; 0: none, the ground is there). A
-// column's top and slope follow from the two ends (lo.f, hi.f and the run), so the count is all a column needs.
+// column's top and slope follow from the two ends (lo.f, hi.f and the run), so the count is all a column needs; when the
+// slope cells start earlier than the default (the run's end), "|<first>" after the counts says where.
 export function encodePieces(plan) {
-  return plan.dir + plan.width + "|" + plan.cols.map((c) => Math.max(0, c.top - c.y0 + 1)).join(",");
+  const counts = plan.dir + plan.width + "|" + plan.cols.map((c) => Math.max(0, c.top - c.y0 + 1)).join(",");
+  return plan.first != null && plan.first !== plan.firstDefault ? counts + "|" + plan.first : counts;
 }
 // -> {dir, width, cols} (the cols as planRamp makes them) or null (not a ramp's pieces, or not these ends')
 export function decodePieces(text, lo, hi) {
-  const m = /^([NESW])([123])\|([0-9,]*)$/.exec(String(text || ""));
+  const m = /^([NESW])([123])\|([0-9,]*)(?:\|(\d+))?$/.exec(String(text || ""));
   if (!m) return null;
   const [dx, dz, k] = DIRS[m[1]], w = +m[2], [px, pz] = dx ? [0, 1] : [1, 0];
   const run = Math.abs(dx ? hi.x - lo.x : hi.z - lo.z), rise = hi.f - lo.f;
   if (rise < 0 || run > MAX_RUN) return null;
-  const first = Math.max(1, run - rise);
+  const last = Math.max(1, run - rise), first = m[4] != null ? +m[4] : last;
+  if (first < 1 || first > last) return null;
   const parts = m[3] ? m[3].split(",") : [];
   const cols = [];
   let n = 0;
   for (let i = 1; i < run; i++) for (const j of lanes(w)) {
     const p = parts[n++];
     if (p === undefined || p === "" || +p > 64) return null;
-    const slope = i >= first, top = slope ? lo.f + (i - first + 1) : lo.f;
+    const { top, slope } = topAt(lo.f, rise, first, i);
     cols.push({ x: lo.x + i * dx + j * px, z: lo.z + i * dz + j * pz, i, j, y0: top - +p + 1, top, k: slope ? k : 0 });
   }
-  return n === parts.length ? { dir: m[1], width: w, cols } : null;
+  return n === parts.length ? { dir: m[1], width: w, cols, first } : null;
 }
 
 // a ramp marker of the link -> its plan ({lo, hi, dir, run, rise, width, ground, prefab, cols, problems}) or null:
@@ -113,7 +143,7 @@ export function planOfMarker(m, cellAt) {
   const a = { x: m.points[0][0], z: m.points[0][1], f: +f.lo }, b = { x: m.points[1][0], z: m.points[1][1], f: +f.hi };
   const plan = planRamp(a, b, +f.width || 1, cellAt);
   const got = decodePieces(f.pieces, plan.lo, plan.hi);
-  if (got && got.dir === plan.dir && got.width === plan.width && got.cols.length === plan.cols.length) plan.cols = got.cols;
+  if (got && got.dir === plan.dir && got.width === plan.width && got.cols.length === plan.cols.length) { plan.cols = got.cols; plan.first = got.first; }
   if (f.ground && f.ground in RAMP_PREFAB) { plan.ground = f.ground; plan.prefab = RAMP_PREFAB[f.ground]; }
   return plan;
 }
