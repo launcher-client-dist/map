@@ -237,3 +237,19 @@ test("W A S D move relative to the view's heading: after a 90° turn W goes alon
   near(moveStep(0, ["w"], 5, 1), [0, SPEED * 0.1]);                 // a long frame is capped
   assert.equal(moveKey("W") !== null && moveKey("q") === null && moveKey("e") === null, true);
 });
+
+test("the Complete look's chunks are asked for nearest to the focus first", () => {
+  const list = [[5, 5], [0, 0], [1, 0], [-1, 0], [0, 2], [3, -1]];
+  const order = CD.nearestFirst(list, 0, 0).map(([a, b]) => a + "_" + b);
+  assert.deepEqual(order.slice(0, 3), ["0_0", "1_0", "-1_0"]);   // (the focus's own chunk, then its neighbours in the list's order)
+  assert.equal(order.at(-1), "5_5");
+  // objects too, and a moved focus re-orders them
+  const objs = list.map(([a, b]) => ({ a, b }));
+  assert.equal(CD.nearestFirst(objs, 80, 80).at(0).a, 5);
+  assert.equal(CD.nearestFirst(objs, 80, 80).at(0).b, 5);
+  assert.deepEqual(list[0], [5, 5]);   // (the list itself is left as it was)
+});
+
+test("the full look's loading line has every language's words", () => {
+  for (const l of ["en", "pt", "es", "zh"]) assert.match(translator3(l)("loadingF", 3), /3/);
+});
