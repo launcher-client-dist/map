@@ -11,6 +11,7 @@ import { parseLever, leverCode, leverText, wallCells, rebased, MAX_WALLS } from 
 import * as RV from "./review.js";
 import * as ED from "./edits.js";
 import * as DR from "./draft.js";
+import * as PK from "./pick.js";
 import { translator3 } from "./map3d/words3d.js";
 
 const lang = pickLang();
@@ -681,16 +682,16 @@ function drawDest(p, m) {
   const end = L.marker(ll(d.x, d.z), { draggable: canEdit(m) && tool !== "dest", autoPan: true, zIndexOffset: sel ? 900 : -100, keyboard: false,
     icon: L.divIcon({ className: "", iconSize: [20, 20], iconAnchor: [10, 10],
       html: `<div class="mk end${sel ? " sel" : ""}" style="background:${k.color}">${k.svg || k.glyph}</div>` }) });
-  end.on("click", (e) => {
-    L.DomEvent.stopPropagation(e);
-    if (pickSpot(p, e.latlng, e.originalEvent)) return;
-    if (tool !== "area" && tool !== "route") select(m.id);
-  });
+  end.on("click", (e) => { L.DomEvent.stopPropagation(e); if (!pickSpot(p, e.latlng, e.originalEvent)) chooseAt(p, m.id, end.getLatLng()); });
+  end.on("mouseover", () => queueMicrotask(() => hoverRing(p, m.id, end.getLatLng())));   // (after the tooltip's own hover)
+  end.on("mouseout", () => hoverRing(p, null));
   end.on("dragend", () => { const [x, z] = cellOf(end.getLatLng()); selected = m.id; withCellFloor(p.floor, x, z, (f) => setDest(m.id, x, z, f)); });
   // its own floor's label only when the rope is selected or on the other floor (hover elsewhere): nothing cluttered
   const text = destLabel(m);
   if (sel || m.floor !== p.floor) end.bindTooltip(el("span", {}, text), { direction: "bottom", className: "lbl end", offset: [0, 8], permanent: sel });
   end.addTo(p.layer);
+  onSpot(p, m.id, end);
+  hookMenu(m.id, end);
 }
 
 function endDestPick() {
@@ -776,12 +777,18 @@ function drawMarker(p, m, ledge = false) {
     L.DomEvent.stopPropagation(e);
     // picking a spot: a tap on any marker or shape sets it there (a rope may land on a painted area)
     if (pickSpot(p, e.latlng, e.originalEvent)) return;
-    if (tool === "area" || tool === "route") return;
+    if (menuJustOpened()) return;
+    const why = PK.whyNotPick(tool);
+    if (why) { toast(t(why)); return; }
     // Shift+click: add it to the selection, or take it off
     if (e.originalEvent?.shiftKey && mode === "edit" && tool === "select") { toggleMulti(m.id); return; }
+    // several markers on the spot: a click again on it takes the next one
+    const id = "x" in m ? clickTarget(p, m.id, e.target.getLatLng()) : m.id, n = byId(id) || m;
+    lastStack = "x" in m ? { p, at: e.target.getLatLng() } : null;
     // a place tool picks up a spawn's settings when one is tapped (the stamp: its monster, count and radius)
-    if (tool === "spawn" && m.kind === "spawn") takeStamp(m);
-    select(m.id);
+    if (tool === "spawn" && n.kind === "spawn") takeStamp(n);
+    select(id);
+    if (lastStack) hoverRing(p, id, lastStack.at);   // the mouse is still there: the next click's marker
   };
   if ("x" in m) {
     if (m.dest) drawDest(p, m);
@@ -792,6 +799,8 @@ function drawMarker(p, m, ledge = false) {
     const mk = L.marker(ll(m.x, m.z), { icon: icon(m), draggable: canEdit(m), autoPan: true, zIndexOffset: sel ? 1000 : 0,
       opacity: ledge ? 0.6 : 1 });   // ledge: another floor's marker seen in this band
     mk.on("click", pick);
+    mk.on("mouseover", () => queueMicrotask(() => hoverRing(p, m.id, mk.getLatLng())));   // (after the tooltip's own hover)
+    mk.on("mouseout", () => hoverRing(p, null));
     mk.on("dragstart", () => { if (!multi.has(m.id)) { selected = m.id; multi.clear(); } });
     mk.on("dragend", () => {
       const [x, z] = cellOf(mk.getLatLng());
@@ -815,11 +824,14 @@ function drawMarker(p, m, ledge = false) {
     else if (m.kind === "spawn" && m.fields?.note) tip(mk, withFlag(m, spawnLabel(m)), { permanent });
     else tip(mk, withFlag(m, m.kind === "rope2" ? ("↔ " + text).trim() : text), { permanent });   // a two-way rope: ↔ always
     mk.addTo(p.layer);
+    onSpot(p, m.id, mk);
+    hookMenu(m.id, mk);
     return;
   }
   if (m.cells) {
     const style = { color: k.color, weight: 0, fillOpacity: sel ? 0.45 : 0.3, interactive: tool === "select" || tool === "walls" || tool === "movegroup" };
     const poly = L.polygon(rings(m.cells), style).on("click", pick).addTo(p.layer);
+    if (style.interactive) hookMenu(m.id, poly);
     const flagged = !!flagOf(m), edge = sel ? "#ffe066" : flagged ? FLAG_RED : rv ? RV_COLOR[rv] : k.color;
     L.polyline(outline(m.cells), { color: edge, weight: sel || rv || flagged ? 3 : 2, dashArray: m.locked ? "4 4" : null, interactive: false }).addTo(p.layer);
     const c = ML.where(m);
@@ -834,6 +846,7 @@ function drawMarker(p, m, ledge = false) {
     const flagged = !!flagOf(m);
     const line = L.polyline(m.points.map(([x, z]) => ll(x, z)), { color: sel ? "#ffe066" : flagged ? FLAG_RED : rv ? RV_COLOR[rv] : k.color, weight: sel || rv || flagged ? 5 : 4,
       dashArray: m.locked ? "6 6" : null, interactive: tool === "select" || tool === "movegroup" }).on("click", pick).addTo(p.layer);
+    if (tool === "select" || tool === "movegroup") hookMenu(m.id, line);
     const [x1, z1] = m.points[m.points.length - 1];
     L.circleMarker(ll(m.points[0][0], m.points[0][1]), { radius: 5, color: "#fff", fillColor: k.color, fillOpacity: 1, weight: 2, interactive: false }).addTo(p.layer);
     if (m.kind === "bridge" && m.points.length >= 2) {
@@ -913,10 +926,14 @@ function pullEnd(p, m, d) {
   const end = L.marker(ll(d.x, d.z), { keyboard: false, zIndexOffset: sel ? 900 : -100,
     icon: L.divIcon({ className: "", iconSize: [20, 20], iconAnchor: [10, 10],
       html: `<div class="mk end${sel ? " sel" : ""}" style="background:${colorOf(m)}">${KIND_UI.lever.svg}</div>` }) });
-  end.on("click", (e) => { L.DomEvent.stopPropagation(e); if (!pickSpot(p, e.latlng, e.originalEvent)) select(m.id); });
+  end.on("click", (e) => { L.DomEvent.stopPropagation(e); if (!pickSpot(p, e.latlng, e.originalEvent)) chooseAt(p, m.id, end.getLatLng()); });
+  end.on("mouseover", () => queueMicrotask(() => hoverRing(p, m.id, end.getLatLng())));   // (after the tooltip's own hover)
+  end.on("mouseout", () => hoverRing(p, null));
   const text = t("kind.lever") + (labelOf(m) ? ` "${labelOf(m)}"` : ` #${m.id}`) + " → " + t("pull.send");
   end.bindTooltip(el("span", {}, text), { direction: "bottom", className: "lbl end", offset: [0, 8], permanent: sel });
   end.addTo(p.layer);
+  onSpot(p, m.id, end);
+  hookMenu(m.id, end);
 }
 
 // Revisar: the halo colours (new, moved or edited) and whether a marker is drawn ("only changes": the changed ones)
@@ -925,6 +942,13 @@ const shown = (m) => mode !== "review" || !reviewOnly || !!rvStatus(m);
 
 function drawPane(p) {
   p.layer.clearLayers();
+  p.spots = [];   // the point markers and end markers drawn here: [{id, layer}] (the crowded spot's stack, the hover ring)
+  // what this edit removed of the link as opened: a red X where each was (under the markers: a new one there takes clicks)
+  // (a marker of another floor this band showed on a ledge: its X shows here too, where it was seen)
+  if (mode === "edit") for (const s of removedNow()) {
+    const v = s.floor !== p.floor && p.floor !== "s" ? ownerValue(p.floor, s.x, s.z) : 0;
+    if (s.floor === p.floor || (v && FL.cellFloor(p.floor, v) === s.floor)) drawRemoved(p, s);
+  }
   const mine = markers.filter((m) => m.floor === p.floor && shown(m));
   // areas under routes under points; the selected one last
   const order = (m) => (m.cells ? 0 : m.points ? 1 : 2) + (isSel(m) ? 3 : 0);
@@ -961,6 +985,166 @@ function drawGhost(p, m) {
 }
 let ghostShown = null;   // Revisar: the removed marker whose panel is open
 
+// ---- removed marks (edit mode): each marker of the link as opened (what Save compares with) that this edit deleted
+// leaves a red X at its spot and, for a rope, a hole, a portal or an elevator, where it led; an area or a route its
+// dashed outline too. Drawing only (nothing goes into the link); undo brings the marker back and its X goes. The X
+// takes no click: a click there is the map's (a new rope on that same cell).
+let rmCache = null;
+let liveAtOpen = new Set();   // the ids the link held when opened: their removal is this visit's (Ctrl+Z brings it back)
+const removedNow = () => (rmCache ||= PK.removedSpots(opened.markers || [], markers, ML.where));
+const RM_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="#000" stroke-opacity=".7" stroke-width="5" stroke-linecap="round"/>'
+  + '<path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="#ff4d4f" stroke-width="2.6" stroke-linecap="round"/></svg>';
+function drawRemoved(p, s) {
+  const was = (opened.markers || []).find((m) => m.id === s.id);
+  if (!was) return;
+  if (!s.end && !("x" in was)) {
+    const pts = was.cells ? outline(was.cells) : [was.points.map(([x, z]) => ll(x, z))];
+    L.polyline(pts, { color: RV_COLOR.removed, weight: 2, dashArray: "4 4", opacity: 0.8, interactive: false }).addTo(p.layer);
+  }
+  const size = s.end ? 18 : 24;
+  const mk = L.marker(ll(s.x, s.z), { keyboard: false, zIndexOffset: -300, bubblingMouseEvents: true,
+    icon: L.divIcon({ className: "", iconSize: [size, size], iconAnchor: [size / 2, size / 2], html: `<div class="rmx${s.end ? " end" : ""}" data-rm="${s.id}">${RM_SVG}</div>` }) });
+  const name = (KIND_UI[was.kind] ? t("kind." + was.kind) : was.kind) + (labelOf(was) ? ` "${labelOf(was)}"` : ` #${was.id}`);
+  const words = el("span", {}, "✕ " + t(s.end ? "rm.end" : "rm.mark") + ": " + name);
+  words.append(el("br"), el("small", {}, t(liveAtOpen.has(s.id) ? "rm.help" : "rm.saved")));
+  mk.bindTooltip(words, { direction: "top", className: "lbl rm", offset: [0, -10] });
+  mk.addTo(p.layer);
+}
+
+// ---- several markers on one spot (within the icon's size on screen): the first click takes the one on top; the
+// selected one is drawn on top, so each click again on the spot takes the next one, round, and the panel says "1 of N"
+const STACK_PX = 13;
+let lastStack = null;   // {p, at}: the pane and the spot of the last click on a marker (the panel's "1 of N")
+function onSpot(p, id, layer) { p.spots.push({ id, layer }); }
+function stackFor(p, at) {
+  if (!p.spots || !p.map._loaded) return [];
+  const c = p.map.latLngToContainerPoint(at);
+  const pts = p.spots.map(({ id, layer }) => { const q = p.map.latLngToContainerPoint(layer.getLatLng()); return { id, x: q.x, y: q.y }; });
+  return PK.stackOrder(PK.stackAt(pts, c.x, c.y, STACK_PX));
+}
+// the marker a click on `id` (drawn at `at`) takes
+const clickTarget = (p, id, at) => PK.nextPick(stackFor(p, at), selected, id);
+// a click on an end marker (a rope's landing, where a lever sends): its marker, the way a click on a marker goes
+function chooseAt(p, id, at) {
+  if (menuJustOpened()) return;
+  const why = PK.whyNotPick(tool);
+  if (why) { toast(t(why)); return; }
+  const next = clickTarget(p, id, at);
+  lastStack = { p, at };
+  select(next);
+  hoverRing(p, next, at);
+}
+// the panel's "1 of N": the selected marker's place in the stack it was clicked in, or null
+function stackInfo() {
+  if (!lastStack || multi.size || selected == null || !panes.includes(lastStack.p)) return null;
+  const order = stackFor(lastStack.p, lastStack.at), i = order.indexOf(selected);
+  return i < 0 || order.length < 2 ? null : { i, n: order.length, next: order[(i + 1) % order.length] };
+}
+// the hover ring: the marker a click here would take gets a light ring, wider than the selected one's (on one cell it
+// lies under it) and, when it is not the one on top, its own name instead of the top one's (mouse only: no hover on touch)
+const HOVER = matchMedia("(hover: hover)");
+const PICKING = ["dest", "walls", "pulldest", "movegroup", "area", "route"];
+let hoverTip = null;   // the target's name opened by the ring (closed with it)
+function hoverRing(p, id, at) {
+  for (const n of p.map.getContainer().querySelectorAll(".mk.hov")) n.classList.remove("hov");
+  if (hoverTip) { if (!hoverTip.getTooltip()?.options.permanent) hoverTip.closeTooltip(); hoverTip = null; }
+  if (id == null || !HOVER.matches || PICKING.includes(tool)) return;
+  const target = clickTarget(p, id, at), c = p.map.latLngToContainerPoint(at);
+  for (const s of p.spots || []) {
+    const q = p.map.latLngToContainerPoint(s.layer.getLatLng());
+    if (Math.hypot(q.x - c.x, q.y - c.y) > STACK_PX) continue;
+    if (s.id === target) {
+      s.layer.getElement()?.querySelector(".mk")?.classList.add("hov");
+      if (target !== id && s.layer.getTooltip() && !hoverTip) { s.layer.openTooltip(); hoverTip = s.layer; }
+    } else if (s.id === id && target !== id && !s.layer.getTooltip()?.options.permanent) s.layer.closeTooltip();
+  }
+}
+
+// ---- the marker menu (edit mode): a right-click, or a long press on a touch screen, on a marker: Delete, Duplicate, To
+// floor. An entry that can't be used says why under it (the same reasons as the Delete key) and a tap on it says so too.
+const LONG_PRESS_MS = 550;
+let menuAt = 0;   // when a long press opened the menu: the tap its release makes is not a click on the marker
+const menuJustOpened = () => Date.now() - menuAt < 700;
+function hookMenu(id, layer) {
+  layer.on("contextmenu", (e) => {
+    if (mode !== "edit") return;   // Review: the browser's own menu
+    L.DomEvent.stopPropagation(e);
+    e.originalEvent?.preventDefault();
+    if (e.originalEvent?.pointerType && e.originalEvent.pointerType !== "mouse") menuAt = Date.now();
+    markerMenu(id, e.originalEvent?.clientX ?? 0, e.originalEvent?.clientY ?? 0);
+  });
+  // a long press (touch, pen): not every browser makes it a contextmenu on a draggable marker
+  const node = layer.getElement?.();
+  if (!node) return;
+  let timer = 0, x0 = 0, y0 = 0, fired = false;
+  const stop = () => clearTimeout(timer);
+  node.addEventListener("pointerdown", (ev) => {
+    if (ev.pointerType === "mouse" || mode !== "edit") return;
+    x0 = ev.clientX; y0 = ev.clientY; fired = false; stop();
+    timer = setTimeout(() => { fired = true; menuAt = Date.now(); markerMenu(id, x0, y0); }, LONG_PRESS_MS);
+  });
+  node.addEventListener("pointermove", (ev) => { if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > 8) stop(); });
+  // the release of a press that opened the menu: the click it makes next is not a click on the marker
+  node.addEventListener("pointerup", () => { stop(); if (fired) { fired = false; menuAt = Date.now(); } });
+  node.addEventListener("pointercancel", stop);
+  layer.on("dragstart", stop);
+}
+let menuFor = null;   // the marker the menu was opened on
+function markerMenu(id, x, y) {
+  if (mode !== "edit" || !byId(id)) return;
+  menuFor = id;
+  if (!multi.has(id)) { multi.clear(); if (selected !== id) { selected = id; refresh(); } }
+  const group = multi.size > 1, m = byId(id);
+  const editable = group ? groupIds().length > 0 : canEdit(m);
+  const known = group ? [...multi].map(byId).some((n) => n && n.kind in KIND_UI) : m.kind in KIND_UI;
+  const delWhy = whyNotDelete() || (group || known ? null : "unknownKind");
+  const dupWhy = known ? null : "unknownKind";
+  const floorWhy = editable ? null : group ? "why.groupLockedMove" : m.locked ? "locked" : "unknownKind";
+  let menu = $("markMenu");
+  if (!menu) {
+    menu = el("div", { id: "markMenu", class: "menu mmenu", role: "menu", hidden: true });
+    document.body.append(menu);
+    document.addEventListener("pointerdown", (e) => { if (!menu.hidden && !menu.contains(e.target)) menu.hidden = true; }, true);
+    document.addEventListener("wheel", () => { menu.hidden = true; }, { passive: true });   // a zoom moves the marker away
+  }
+  menu.textContent = "";
+  const close = () => { menu.hidden = true; };
+  // an entry acts on what the menu was opened for: that marker (or its group), whatever a stray click selected since
+  const group0 = group ? new Set(multi) : null;
+  const reassert = () => {
+    if (group0) { multi.clear(); for (const g of group0) if (byId(g)) multi.add(g); selected = null; }
+    else { multi.clear(); selected = id; }
+  };
+  const item = (act, label, why, fn) => el("button", { type: "button", role: "menuitem", "data-act": act, class: why ? "off" : null,
+    "aria-disabled": why ? "true" : null, onclick: () => { if (why) { toast(t(why)); return; } close(); reassert(); fn(); } },
+  el("div", {}, label, why ? el("span", {}, t(why)) : null));
+  menu.append(el("div", { class: "mhead" }, group ? el("span", { class: "mk mini plain" }, "▣") : dotNode(m.kind in KIND_UI ? m.kind : "?", "mk mini"),
+    el("b", {}, group ? t("menuOf", multi.size) : (KIND_UI[m.kind] ? t("kind." + m.kind) : m.kind) + " #" + m.id)));
+  menu.append(item("menu-delete", "🗑 " + t("del") + (group ? " (" + groupIds().length + ")" : ""), delWhy, deleteSelected));
+  menu.append(item("menu-duplicate", "⧉ " + t("dup"), dupWhy, duplicateSel));
+  // to another floor: the floors with their counts; the view follows
+  const fs = el("select", { "data-act": "menu-floor", "aria-label": t("menuFloor"), disabled: !!floorWhy });
+  const counts = FL.floorCounts(markers);
+  fs.append(el("option", { value: "" }, t("toFloor")));
+  for (const f of tileMeta.floors) fs.append(el("option", { value: f }, floorOptionText(f, counts)));
+  fs.addEventListener("change", () => {
+    const f = fs.value;
+    if (!f) return;
+    close();
+    reassert();
+    if (group) { groupToFloor(f); return; }
+    commit(() => { const n = byId(id); if (!n || n.floor === f) return false; n.floor = f; });
+    if (!panes.some((q) => q.floor === f)) showFloor(f);
+  });
+  menu.append(el("label", { class: "mfloor" + (floorWhy ? " off" : ""), onclick: () => { if (floorWhy) toast(t(floorWhy)); } },
+    el("div", {}, t("menuFloor"), floorWhy ? el("span", {}, t(floorWhy)) : null), fs));
+  menu.hidden = false;
+  const r = menu.getBoundingClientRect();
+  menu.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + "px";
+  menu.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + "px";
+  menu.querySelector("button:not(.off)")?.focus({ preventScroll: true });
+}
+
 function drawDraft(p, preview) {
   p.draft.clearLayers();
   if (draftRoute && draftRoute.floor === p.floor && draftRoute.points.length) {
@@ -977,6 +1161,10 @@ function reviewDiff() { return (rvCache ||= RV.diffOf(baseMarkers, markers)); }
 
 function refresh() {
   rvCache = null;
+  rmCache = null;
+  // the marker menu stays only while its marker is still the selection (a Delete key, an undo, Esc: it goes)
+  const mm = $("markMenu");
+  if (mm && !mm.hidden && !(byId(menuFor) && (selected === menuFor || multi.has(menuFor)))) mm.hidden = true;
   // picking a spot for a marker that is gone or locked now (undo, delete): stop picking
   if (["dest", "walls", "pulldest"].includes(tool) && !canEdit(byId(destFor))) { tool = "select"; destFor = null; paintTools(); }
   if (tool === "movegroup" && multi.size < 2) { tool = "select"; paintTools(); }
@@ -1201,7 +1389,7 @@ function toggleMenu(id) {
 
 function closeMenus() {
   let was = false;
-  for (const id of ["thingsMenu", "moreMenu"]) {
+  for (const id of ["thingsMenu", "moreMenu", "markMenu"]) {
     const menu = $(id);
     if (menu && !menu.hidden) { menu.hidden = true; was = true; }
   }
@@ -1418,6 +1606,12 @@ function renderPanel() {
       el("span", {}, `${floorShort(m.floor)} · x ${where[0]}, z ${where[1]}` + (m.cells ? " · " + t("cells", m.cells.length) : m.points ? " · " + t("points", m.points.length) : "")),
       el("button", { type: "button", class: "chip", onclick: () => copy(posLine(where[0], where[1], m.floor)) }, t("copyPos"))));
   }
+  // several markers on the spot it was clicked on: which one this is, and the next one
+  const st = stackInfo();
+  if (st) {
+    panel.append(el("div", { class: "sub stack", "data-act": "stack", title: t("stackHelp") }, el("span", {}, "▣ " + t("stackN", st.i + 1, st.n)),
+      el("button", { type: "button", class: "chip", "data-act": "stack-next", title: t("stackHelp"), onclick: () => select(st.next) }, t("stackNext") + " ▸")));
+  }
   const body = el("div", { class: "body" });
   panel.append(body);
   // a reviewer's flag: what to fix here; whoever can change the marker marks it done (the flag goes, not the marker)
@@ -1492,7 +1686,14 @@ function renderPanel() {
   }
   panel.append(el("div", { class: "ft" },
     mode === "edit" && m.kind in KIND_UI ? el("button", { type: "button", "data-act": "duplicate", title: t("dupHelp"), onclick: duplicateSel }, "⧉ " + t("dup")) : null,
-    el("button", { type: "button", class: "danger", "data-act": "delete", disabled: mode !== "edit" || (!editable && !(STAFF && m.kind in KIND_UI)), onclick: deleteSelected }, t("del"))));
+    delButton(whyNotDelete() || (m.kind in KIND_UI ? null : "unknownKind"), t("del"))));
+}
+
+// the Delete button: when it can't delete it looks off but still takes a click, and the click says why (a disabled
+// button would take none: the old silent no-op)
+function delButton(why, label) {
+  return el("button", { type: "button", class: "danger" + (why ? " off" : ""), "data-act": "delete", "aria-disabled": why ? "true" : null,
+    title: why ? t(why) : null, onclick: () => (why ? toast(t(why)) : deleteSelected()) }, label);
 }
 
 // ---- several selected: what they are, then Move, Duplicate, To floor, Delete (each one undo step)
@@ -1523,7 +1724,7 @@ function groupPanel(panel) {
   body.append(el("div", { class: "row tight" }, fs));
   body.append(el("div", { class: "id hintline" }, t("selHelp")));
   panel.append(el("div", { class: "ft" },
-    el("button", { type: "button", class: "danger", "data-act": "delete", disabled: !editable, onclick: deleteSelected }, t("del") + " (" + ids.length + ")")));
+    delButton(whyNotDelete(), t("del") + " (" + ids.length + ")")));
 }
 
 // ---- an area's or a portal's colour: swatches (the kind's own first), the map redraws at once
@@ -1826,16 +2027,21 @@ function showDest(d) {
   refresh();
 }
 
+// why Delete can't delete now (an i18n key; null: it can): the key, the panel's buttons and the marker menu ask this
+function whyNotDelete() {
+  return PK.whyNotDelete({ mode, tool: viewMode === "3d" ? "select" : tool, selected: byId(selected) || null, group: multi.size ? [...multi].map(byId).filter(Boolean) : null,
+    staff: STAFF, editable: canEdit });
+}
+// a Delete that can't: a short toast says why (never a silent no-op)
 function deleteSelected() {
-  if (mode !== "edit") return;
+  const why = whyNotDelete();
+  if (why) { toast(t(why)); return; }
   if (multi.size) {   // a group: its markers that can be changed, in one undo step
     const ids = new Set(groupIds());
-    if (!ids.size) return;
     commit(() => { markers = markers.filter((x) => !ids.has(x.id)); multi.clear(); selected = null; });
     return;
   }
   const m = byId(selected);
-  if (!m || (m.locked && !STAFF)) return;
   commit(() => { markers = markers.filter((x) => x.id !== m.id); selected = null; });
 }
 
@@ -2829,7 +3035,15 @@ function buildBar() {
       e.preventDefault(); $("gotoBox").focus(); $("gotoBox").select(); return;
     }
     if (e.key === "Escape" && e.target.closest("select, #panel input, #panel textarea")) e.target.blur();
-    else if (e.target.closest("input, textarea, select")) return;
+    else if (e.target.closest("input, textarea, select")) {
+      // Delete in one of the panel's fields edits the field; when it changes nothing there, the marker was meant: say how
+      if ((selected != null || multi.size) && e.target.closest("#panel")) {
+        let start = null, end = null;
+        try { start = e.target.selectionStart; end = e.target.selectionEnd; } catch { /* a field with no caret */ }
+        if (PK.deleteMeantMarker({ key: e.key, tag: e.target.tagName, type: e.target.type, value: e.target.value, start, end })) toast(t("why.field"));
+      }
+      return;
+    }
     if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
     else if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); duplicateSel(); }   // (the browser's bookmark key)
@@ -2883,6 +3097,7 @@ async function start() {
     linkState = state;
     baseMarkers = ML.baselineOf(state).markers;
     markers = clone(state.markers);
+    liveAtOpen = new Set(state.markers.map((m) => m.id));
     nextId = state.next;
     view = state.view;
     const known = (f) => tileMeta.floors.includes(f);
