@@ -1,0 +1,999 @@
+{
+"props": {
+"rope": {
+"file": "rope.glb.gz",
+"bytes": 5161,
+"size": [
+0.72,
+0.97,
+1.11
+]
+},
+"hole": {
+"file": "hole.glb.gz",
+"bytes": 3099,
+"size": [
+1.29,
+0.22,
+1.29
+]
+},
+"burrow": {
+"file": "burrow.glb.gz",
+"bytes": 5170,
+"size": [
+1.27,
+0.54,
+1.29
+]
+},
+"portal": {
+"file": "portal.glb.gz",
+"bytes": 4096,
+"size": [
+1.54,
+2.87,
+0.83
+]
+},
+"portal_red": {
+"file": "portal_red.glb.gz",
+"bytes": 4013,
+"size": [
+1.54,
+2.87,
+0.83
+]
+},
+"lever": {
+"file": "lever.glb.gz",
+"bytes": 1211,
+"size": [
+0.98,
+1.69,
+0.75
+]
+},
+"npc": {
+"file": "npc.glb.gz",
+"bytes": 15232,
+"size": [
+0.63,
+1.59,
+0.76
+]
+}
+},
+"monsters": {
+"Amphitere": {
+"file": "a29.glb.gz",
+"bytes": 22018,
+"size": [
+12.86,
+5.47,
+5.34
+],
+"icon": "icons/a29.png"
+},
+"Ancient Snake": {
+"file": "a17.glb.gz",
+"bytes": 8249,
+"size": [
+0.76,
+2.15,
+1.43
+],
+"icon": "icons/a17.png"
+},
+"Bandit": {
+"file": "a27.glb.gz",
+"bytes": 14540,
+"size": [
+0.79,
+1.5,
+0.89
+],
+"icon": "icons/a27.png"
+},
+"Banshee": {
+"file": "a220.glb.gz",
+"bytes": 18009,
+"size": [
+1.35,
+1.74,
+1.6
+],
+"icon": "icons/a220.png"
+},
+"Bear": {
+"file": "a232.glb.gz",
+"bytes": 17678,
+"size": [
+1.25,
+1.37,
+2.21
+],
+"icon": "icons/a232.png"
+},
+"Black Lamb": {
+"file": "a37.glb.gz",
+"bytes": 6610,
+"size": [
+0.39,
+0.67,
+0.9
+],
+"icon": "icons/a37.png"
+},
+"Black Sheep": {
+"file": "a35.glb.gz",
+"bytes": 21395,
+"size": [
+0.87,
+1.12,
+1.29
+],
+"icon": "icons/a35.png"
+},
+"Bone Eater": {
+"file": "a195.glb.gz",
+"bytes": 7172,
+"size": [
+1.37,
+2.37,
+1.36
+],
+"icon": "icons/a195.png"
+},
+"Cave Spider": {
+"file": "a141.glb.gz",
+"bytes": 10094,
+"size": [
+1.36,
+0.67,
+1.07
+],
+"icon": "icons/a141.png"
+},
+"Cave Troll": {
+"file": "a22.glb.gz",
+"bytes": 19259,
+"size": [
+2.26,
+2.53,
+2.58
+],
+"icon": "icons/a22.png"
+},
+"Chained War": {
+"file": "a263.glb.gz",
+"bytes": 40508,
+"size": [
+2.63,
+3.01,
+2.77
+],
+"icon": "icons/a263.png"
+},
+"Conquest Champion": {
+"file": "a262.glb.gz",
+"bytes": 44855,
+"size": [
+3.63,
+3.42,
+2.15
+],
+"icon": "icons/a262.png"
+},
+"Conquest Crow": {
+"file": "a194.glb.gz",
+"bytes": 17484,
+"size": [
+1.06,
+3.47,
+0.85
+],
+"icon": "icons/a194.png"
+},
+"Conquest Fowler": {
+"file": "a172.glb.gz",
+"bytes": 20765,
+"size": [
+0.9,
+1.79,
+1.22
+],
+"icon": "icons/a172.png"
+},
+"Conquest Priestess": {
+"file": "a174.glb.gz",
+"bytes": 15342,
+"size": [
+1.11,
+1.67,
+0.68
+],
+"icon": "icons/a174.png"
+},
+"Crazed Occultist": {
+"file": "a175.glb.gz",
+"bytes": 13682,
+"size": [
+0.92,
+1.49,
+0.91
+],
+"icon": "icons/a175.png"
+},
+"Cube Of Doom": {
+"file": "a4.glb.gz",
+"bytes": 2208,
+"size": [
+1.1,
+1.1,
+1.1
+],
+"icon": "icons/a4.png"
+},
+"Deadly Webcap": {
+"file": "a2.glb.gz",
+"bytes": 9917,
+"size": [
+1.92,
+3.15,
+2.0
+],
+"icon": "icons/a2.png"
+},
+"Deer": {
+"file": "a221.glb.gz",
+"bytes": 12500,
+"size": [
+0.66,
+1.7,
+1.61
+],
+"icon": "icons/a221.png"
+},
+"Devil Spider": {
+"file": "a142.glb.gz",
+"bytes": 12102,
+"size": [
+2.55,
+1.25,
+2.0
+],
+"icon": "icons/a142.png"
+},
+"Digger": {
+"file": "a33.glb.gz",
+"bytes": 13726,
+"size": [
+1.09,
+1.0,
+0.9
+],
+"icon": "icons/a33.png"
+},
+"Eye Of Pestilence": {
+"file": "a5.glb.gz",
+"bytes": 4872,
+"size": [
+0.96,
+1.83,
+1.02
+],
+"icon": "icons/a5.png"
+},
+"Faun": {
+"file": "a265.glb.gz",
+"bytes": 12136,
+"size": [
+0.79,
+1.15,
+0.74
+],
+"icon": "icons/a265.png"
+},
+"Ghost": {
+"file": "a283.glb.gz",
+"bytes": 5050,
+"size": [
+0.92,
+1.49,
+0.42
+],
+"icon": "icons/a283.png"
+},
+"Ghoul": {
+"file": "a308.glb.gz",
+"bytes": 14390,
+"size": [
+1.06,
+0.95,
+1.02
+],
+"icon": "icons/a308.png"
+},
+"Giant Rat": {
+"file": "a23.glb.gz",
+"bytes": 14389,
+"size": [
+0.98,
+1.05,
+2.51
+],
+"icon": "icons/a23.png"
+},
+"Goblin": {
+"file": "a25.glb.gz",
+"bytes": 15049,
+"size": [
+1.13,
+1.08,
+1.16
+],
+"icon": "icons/a25.png"
+},
+"Grizzly Bear": {
+"file": "a236.glb.gz",
+"bytes": 18305,
+"size": [
+1.63,
+1.78,
+2.87
+],
+"icon": "icons/a236.png"
+},
+"Huntsman": {
+"file": "a316.glb.gz",
+"bytes": 15375,
+"size": [
+2.0,
+1.74,
+1.44
+],
+"icon": "icons/a316.png"
+},
+"Imp": {
+"file": "a217.glb.gz",
+"bytes": 21472,
+"size": [
+1.7,
+2.16,
+1.82
+],
+"icon": "icons/a217.png"
+},
+"Lamb": {
+"file": "a36.glb.gz",
+"bytes": 6696,
+"size": [
+0.39,
+0.67,
+0.9
+],
+"icon": "icons/a36.png"
+},
+"Lava Snoop": {
+"file": "a256.glb.gz",
+"bytes": 1006,
+"size": [
+1.68,
+1.03,
+1.68
+],
+"icon": "icons/a256.png"
+},
+"Lintwurm": {
+"file": "a225.glb.gz",
+"bytes": 11045,
+"size": [
+0.66,
+2.3,
+2.64
+],
+"icon": "icons/a225.png"
+},
+"Minotaur": {
+"file": "a32.glb.gz",
+"bytes": 17942,
+"size": [
+2.38,
+2.06,
+1.97
+],
+"icon": "icons/a32.png"
+},
+"Mireling": {
+"file": "a218.glb.gz",
+"bytes": 16499,
+"size": [
+1.55,
+1.83,
+1.97
+],
+"icon": "icons/a218.png"
+},
+"Mireling Noble": {
+"file": "a219.glb.gz",
+"bytes": 20073,
+"size": [
+2.76,
+2.5,
+3.09
+],
+"icon": "icons/a219.png"
+},
+"Monk": {
+"file": "a113.glb.gz",
+"bytes": 13996,
+"size": [
+0.84,
+1.53,
+0.56
+],
+"icon": "icons/a113.png"
+},
+"Necromancer": {
+"file": "a38.glb.gz",
+"bytes": 16406,
+"size": [
+0.94,
+1.83,
+1.08
+],
+"icon": "icons/a38.png"
+},
+"Occultist Acolyte": {
+"file": "a39.glb.gz",
+"bytes": 13197,
+"size": [
+0.92,
+1.52,
+0.54
+],
+"icon": "icons/a39.png"
+},
+"Occultist Apprentice": {
+"file": "a42.glb.gz",
+"bytes": 13707,
+"size": [
+0.92,
+1.52,
+0.64
+],
+"icon": "icons/a42.png"
+},
+"Occultist Enforcer": {
+"file": "a41.glb.gz",
+"bytes": 15088,
+"size": [
+0.96,
+1.61,
+0.95
+],
+"icon": "icons/a41.png"
+},
+"Occultist Scholar": {
+"file": "a40.glb.gz",
+"bytes": 13365,
+"size": [
+0.92,
+1.47,
+0.54
+],
+"icon": "icons/a40.png"
+},
+"Omen": {
+"file": "a261.glb.gz",
+"bytes": 5016,
+"size": [
+1.64,
+3.6,
+1.63
+],
+"icon": "icons/a261.png"
+},
+"Orc Berserker": {
+"file": "a43.glb.gz",
+"bytes": 19897,
+"size": [
+2.35,
+2.08,
+1.18
+],
+"icon": "icons/a43.png"
+},
+"Orc General": {
+"file": "a44.glb.gz",
+"bytes": 25231,
+"size": [
+2.84,
+2.62,
+1.23
+],
+"icon": "icons/a44.png"
+},
+"Orc Infantry": {
+"file": "a46.glb.gz",
+"bytes": 17224,
+"size": [
+1.84,
+1.95,
+1.12
+],
+"icon": "icons/a46.png"
+},
+"Orc Shaman": {
+"file": "a45.glb.gz",
+"bytes": 21065,
+"size": [
+2.63,
+2.08,
+1.37
+],
+"icon": "icons/a45.png"
+},
+"Pestilence Knight": {
+"file": "a47.glb.gz",
+"bytes": 24510,
+"size": [
+2.54,
+4.86,
+2.27
+],
+"icon": "icons/a47.png"
+},
+"Pestilence Plague": {
+"file": "a124.glb.gz",
+"bytes": 9899,
+"size": [
+0.79,
+0.82,
+2.51
+],
+"icon": "icons/a124.png"
+},
+"Pestilence Spawn": {
+"file": "a16.glb.gz",
+"bytes": 7338,
+"size": [
+1.46,
+1.99,
+1.58
+],
+"icon": "icons/a16.png"
+},
+"Pestilence Stinger": {
+"file": "a7.glb.gz",
+"bytes": 18564,
+"size": [
+1.44,
+1.71,
+0.82
+],
+"icon": "icons/a7.png"
+},
+"Plea": {
+"file": "a15.glb.gz",
+"bytes": 8550,
+"size": [
+0.76,
+0.9,
+0.46
+],
+"icon": "icons/a15.png"
+},
+"Plea Occultist": {
+"file": "a173.glb.gz",
+"bytes": 9983,
+"size": [
+0.75,
+1.06,
+0.47
+],
+"icon": "icons/a173.png"
+},
+"Profaner": {
+"file": "a140.glb.gz",
+"bytes": 14529,
+"size": [
+1.65,
+2.85,
+1.19
+],
+"icon": "icons/a140.png"
+},
+"Rat": {
+"file": "a258.glb.gz",
+"bytes": 9093,
+"size": [
+0.47,
+0.49,
+1.51
+],
+"icon": "icons/a258.png"
+},
+"Rat Shipper": {
+"file": "a123.glb.gz",
+"bytes": 15309,
+"size": [
+0.98,
+1.05,
+2.51
+],
+"icon": "icons/a123.png"
+},
+"Rotwurm": {
+"file": "a264.glb.gz",
+"bytes": 33204,
+"size": [
+1.76,
+4.44,
+2.98
+],
+"icon": "icons/a264.png"
+},
+"Rubellus": {
+"file": "a125.glb.gz",
+"bytes": 3278,
+"size": [
+0.99,
+0.9,
+0.92
+],
+"icon": "icons/a125.png"
+},
+"Sheep": {
+"file": "a34.glb.gz",
+"bytes": 21754,
+"size": [
+0.87,
+1.12,
+1.29
+],
+"icon": "icons/a34.png"
+},
+"Skal Traitor": {
+"file": "a314.glb.gz",
+"bytes": 16972,
+"size": [
+1.51,
+1.35,
+1.44
+],
+"icon": "icons/a314.png"
+},
+"Skeleton": {
+"file": "a19.glb.gz",
+"bytes": 12775,
+"size": [
+0.82,
+1.42,
+0.6
+],
+"icon": "icons/a19.png"
+},
+"Smelt Ooze": {
+"file": "a278.glb.gz",
+"bytes": 2289,
+"size": [
+0.9,
+0.9,
+0.9
+],
+"icon": "icons/a278.png"
+},
+"Sunskin": {
+"file": "a138.glb.gz",
+"bytes": 17949,
+"size": [
+1.13,
+1.08,
+1.17
+],
+"icon": "icons/a138.png"
+},
+"Sunskin Enchanter": {
+"file": "a139.glb.gz",
+"bytes": 17718,
+"size": [
+1.13,
+1.3,
+1.17
+],
+"icon": "icons/a139.png"
+},
+"Swamp Tentacle": {
+"file": "a254.glb.gz",
+"bytes": 8741,
+"size": [
+2.25,
+3.59,
+2.4
+],
+"icon": "icons/a254.png"
+},
+"Swamp Troll": {
+"file": "a21.glb.gz",
+"bytes": 23709,
+"size": [
+2.79,
+3.02,
+3.26
+],
+"icon": "icons/a21.png"
+},
+"Terror Spider": {
+"file": "a143.glb.gz",
+"bytes": 12712,
+"size": [
+4.25,
+2.08,
+3.34
+],
+"icon": "icons/a143.png"
+},
+"The Black Knight": {
+"file": "a309.glb.gz",
+"bytes": 29923,
+"size": [
+1.27,
+2.25,
+1.0
+],
+"icon": "icons/a309.png"
+},
+"Thug": {
+"file": "a267.glb.gz",
+"bytes": 13599,
+"size": [
+1.44,
+1.91,
+1.91
+],
+"icon": "icons/a267.png"
+},
+"Titan": {
+"file": "a266.glb.gz",
+"bytes": 23946,
+"size": [
+3.55,
+3.35,
+4.51
+],
+"icon": "icons/a266.png"
+},
+"Tomb Diviner": {
+"file": "a191.glb.gz",
+"bytes": 10909,
+"size": [
+0.96,
+1.93,
+0.83
+],
+"icon": "icons/a191.png"
+},
+"Tomb Guardian": {
+"file": "a190.glb.gz",
+"bytes": 12546,
+"size": [
+1.32,
+3.38,
+1.03
+],
+"icon": "icons/a190.png"
+},
+"Tomb Worker": {
+"file": "a192.glb.gz",
+"bytes": 16062,
+"size": [
+1.77,
+3.15,
+1.73
+],
+"icon": "icons/a192.png"
+},
+"Tundra Rat": {
+"file": "a24.glb.gz",
+"bytes": 14794,
+"size": [
+1.17,
+1.26,
+3.01
+],
+"icon": "icons/a24.png"
+},
+"Unstable Quartz": {
+"file": "a313.glb.gz",
+"bytes": 7455,
+"size": [
+1.78,
+3.51,
+1.82
+],
+"icon": "icons/a313.png"
+},
+"Viscid Goblin": {
+"file": "a26.glb.gz",
+"bytes": 12840,
+"size": [
+1.13,
+1.07,
+1.16
+],
+"icon": "icons/a26.png"
+},
+"Walking Boletus": {
+"file": "a3.glb.gz",
+"bytes": 3477,
+"size": [
+0.99,
+0.9,
+0.92
+],
+"icon": "icons/a3.png"
+},
+"Wolf": {
+"file": "a233.glb.gz",
+"bytes": 13152,
+"size": [
+0.54,
+1.07,
+2.19
+],
+"icon": "icons/a233.png"
+},
+"Young Amphitere": {
+"file": "a28.glb.gz",
+"bytes": 21649,
+"size": [
+9.08,
+3.86,
+3.77
+],
+"icon": "icons/a28.png"
+},
+"Alpha Wolf": {
+"file": "a224.glb.gz",
+"bytes": 15713,
+"size": [
+1.11,
+2.11,
+4.4
+],
+"icon": "icons/a224.png"
+},
+"Bridge Troll": {
+"file": "a284.glb.gz",
+"bytes": 19259,
+"size": [
+2.26,
+2.53,
+2.58
+],
+"icon": "icons/a284.png"
+},
+"Brother Rossi": {
+"file": "a321.glb.gz",
+"bytes": 14191,
+"size": [
+1.05,
+1.91,
+0.7
+],
+"icon": "icons/a321.png"
+},
+"Capozzi The Bandit": {
+"file": "a156.glb.gz",
+"bytes": 13451,
+"size": [
+0.88,
+1.49,
+0.57
+],
+"icon": "icons/a156.png"
+},
+"Gaglio The Bandit": {
+"file": "a157.glb.gz",
+"bytes": 16623,
+"size": [
+0.92,
+1.93,
+0.63
+],
+"icon": "icons/a157.png"
+},
+"Great Lintwurm": {
+"file": "a226.glb.gz",
+"bytes": 35025,
+"size": [
+3.92,
+9.86,
+6.63
+],
+"icon": "icons/a226.png"
+},
+"Mateo The Bandit": {
+"file": "a155.glb.gz",
+"bytes": 15954,
+"size": [
+0.72,
+1.88,
+1.4
+],
+"icon": "icons/a155.png"
+},
+"Minerva": {
+"file": "a8.glb.gz",
+"bytes": 18145,
+"size": [
+1.53,
+1.97,
+1.81
+],
+"icon": "icons/a8.png"
+},
+"Skal Brawler": {
+"file": "a315.glb.gz",
+"bytes": 13508,
+"size": [
+0.99,
+1.04,
+0.99
+],
+"icon": "icons/a315.png"
+},
+"The Augur": {
+"file": "a231.glb.gz",
+"bytes": 18615,
+"size": [
+1.1,
+1.87,
+0.79
+],
+"icon": "icons/a231.png"
+},
+"The Blackhat": {
+"file": "a146.glb.gz",
+"bytes": 17082,
+"size": [
+0.94,
+1.62,
+0.81
+],
+"icon": "icons/a146.png"
+},
+"The Broodmother": {
+"file": "a255.glb.gz",
+"bytes": 14724,
+"size": [
+1.47,
+1.57,
+3.77
+],
+"icon": "icons/a255.png"
+},
+"The Gardener": {
+"file": "a147.glb.gz",
+"bytes": 16188,
+"size": [
+0.94,
+1.83,
+1.08
+],
+"icon": "icons/a147.png"
+},
+"Tock": {
+"file": "a202.glb.gz",
+"bytes": 14600,
+"size": [
+0.82,
+1.05,
+0.46
+],
+"icon": "icons/a202.png"
+}
+}
+}
