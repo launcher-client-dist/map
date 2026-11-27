@@ -58,7 +58,7 @@ async function clickAt(x, y, modifiers = 0) {
 async function moveTo(x, y) { await cdp("Input.dispatchMouseEvent", { type: "mouseMoved", x, y }); await sleep(120); }
 // a key as the keyboard sends it (modifiers: 2 Ctrl)
 async function key(k, code, vk, modifiers = 0) {
-  await cdp("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk, modifiers, text: modifiers ? undefined : k });
+  await cdp("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk, modifiers, ...(k.length === 1 && !modifiers ? { text: k } : {}) });
   await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk, modifiers });
   await sleep(150);
 }
@@ -87,7 +87,7 @@ try {
   });
   await cdp("Page.enable");
   await cdp("Runtime.enable");
-  const nav = await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=-236,174` });
+  const nav = await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=-238,174&zoom=1.3` });
   if (nav.errorText) throw new Error("navigate: " + nav.errorText);
   await sleep(1500);
   const up = await js(`(async () => { for (let i = 0; i < 200 && !window.__v3d; i++) await new Promise((r) => setTimeout(r, 100));
@@ -152,6 +152,7 @@ try {
   await moveTo(there.x, there.y);
   await key("v", "KeyV", 86, 2);
   await sleep(500);
+  await shot("pasted.png");
   const ropes = (await js("window.__state()")).markers.filter((m) => m.kind === "rope");
   assert.equal(ropes.length, 2, "a pasted rope: " + JSON.stringify(ropes));
   const copy = ropes.find((m) => m.x === -232 && m.z === 176);
@@ -163,9 +164,11 @@ try {
   await clickAt(roof.x, roof.y);
   const whole = (await js("window.__v3d.state()")).asset;
   assert.ok(whole && whole.kind === "roof" && whole.n > 1, "the whole roof: " + JSON.stringify(whole));
+  await shot("asset_whole.png");
   await clickAt(roof.x, roof.y, 1);
   const one = (await js("window.__v3d.state()")).asset;
   assert.ok(one && one.n === 1, "Alt: one block: " + JSON.stringify(one));
+  await shot("asset_one.png");
 
   // the keys: ? lists them; ] / [ step the floors; , lowers the cut
   await key("?", "Slash", 191);

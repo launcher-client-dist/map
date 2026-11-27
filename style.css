@@ -563,3 +563,5 @@ body:not(.v3d) #view3d { display: none; }
 .v3d-help td:first-child { white-space: nowrap; }
 .v3d-help kbd, .v3d-tools kbd { display: inline-block; background: #0e1116; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
             padding: 0 6px; margin-right: 4px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--text); }
+.v3d-tip .hgt { color: #c8d6ff; margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; }
+.v3d-tip .hgt .on { font-weight: 600; } .v3d-tip .hgt .on.yes { color: #30c46c; } .v3d-tip .hgt .on.no { color: #ff6b6f; }

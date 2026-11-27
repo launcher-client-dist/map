@@ -908,6 +908,10 @@ export async function open(api) {
     showHint(t3("assetInfo", sel.cubes.length, Math.min(...ys), Math.max(...ys), t3("kind3." + sel.kind)) + " · " + t3("assetHint"));
     draw();
   }
+  // the blocks joined by a face or an edge (a roof's slopes step up diagonally)
+  const NEAR18 = [];
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++)
+    if ((dx || dy || dz) && Math.abs(dx) + Math.abs(dy) + Math.abs(dz) <= 2) NEAR18.push([dx, dy, dz]);
   function assetAt(pk, single) {
     const c = pk.cube;
     if (!c || !pk.cell) return null;
@@ -917,7 +921,7 @@ export async function open(api) {
     const seen = new Set([start.join()]), out = [start], todo = [start];
     while (todo.length && out.length < 1500) {
       const [x, y, z] = todo.pop();
-      for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
+      for (const [dx, dy, dz] of NEAR18) {
         const n = [x + dx, y + dy, z + dz], key = n.join();
         if (seen.has(key)) continue;
         seen.add(key);
