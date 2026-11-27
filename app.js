@@ -11,6 +11,7 @@ import { parseLever, leverCode, leverText, wallCells, rebased, MAX_WALLS } from 
 import * as RV from "./review.js";
 import * as ED from "./edits.js";
 import * as DR from "./draft.js";
+import { translator3 } from "./map3d/words3d.js";
 
 const lang = pickLang();
 const t = translator(lang);
@@ -960,6 +961,7 @@ function refresh() {
   for (const id of ["redo", "redoM"]) if ($(id)) $(id).disabled = !redoStack.length || mode !== "edit";
   renderPanel();
   measureLinkSoon();
+  if (view3d && viewMode === "3d") view3d.refresh();
 }
 
 // ------------------------------------------------------------------------------------------------ tools
@@ -2138,6 +2140,7 @@ function buildFrame() {
     el("input", { id: "mapTitle", type: "text", autocomplete: "off", spellcheck: "false" }),
     gotoBox(),
     el("div", { class: "bar-right" },
+      viewSeg(),
       modeSeg(),
       iconBtn("undo", "↶", t("undo") + " (Ctrl+Z)", undo),
       iconBtn("redo", "↷", t("redo") + " (Ctrl+Y)", redo),
@@ -2209,6 +2212,64 @@ function paintSeg(attr, now) {
     b.classList.toggle("on", on);
     b.setAttribute("aria-pressed", String(on));
   }
+}
+// 2D | 3D: the 3D edit view (map3d/view3d.js, loaded on the first switch) over the same markers and link
+const t3 = translator3(lang);
+let viewMode = "2d", view3d = null, view3dLoading = null;
+const viewSeg = () => segOf("data-view", [["2d", t3("v2d")], ["3d", t3("v3d"), t3("v3dHelp")]], viewMode, setView, t3("viewWord"));
+function place3d(kind, x, z, floor) {
+  let id = null;
+  if (mode !== "edit") return null;
+  commit(() => {
+    const m = newMarker(kind, floor, { x, z });
+    if (kind === "spawn") { if (stamp.monster) m.fields.monster = stamp.monster; m.fields.count = stamp.count; m.fields.radius = stamp.radius; }
+    markers.push(m);
+    selected = id = m.id;
+  });
+  return id;
+}
+// the 3D view's paste: copies of the markers (taken when copied), their middle at (x, z), on that floor (a destination on
+// their own floor goes along); one undo step, the copies selected
+function paste3d(list, x, z, floor) {
+  if (mode !== "edit" || !list.length) return 0;
+  let n = 0;
+  commit(() => {
+    const mid = ED.middle(list.map((m) => ML.where(m)).filter(Boolean)) || [x, z];
+    const [copies, next] = ED.duplicated(list, nextId, x - mid[0], z - mid[1]);
+    nextId = next;
+    multi.clear();
+    for (const c of copies) {
+      const m = c.floor === floor ? c : ED.onFloor(c, floor);
+      markers.push(m);
+      multi.add(m.id);
+    }
+    selected = copies.length === 1 ? copies[0].id : null;
+    if (copies.length < 2) multi.clear();
+    n = copies.length;
+  });
+  return n;
+}
+async function setView(v) {
+  if (v === viewMode && (v === "2d" || view3d)) return;
+  viewMode = v;
+  paintSeg("data-view", v);
+  document.body.classList.toggle("v3d", v === "3d");
+  if (v === "2d") {
+    if (view3d) { const w = view3d.where(); view3d.hide(); const p = targetPane(); p.map.setView(ll(w.x, w.z), Math.max(p.map.getZoom(), 2), { animate: false }); }
+    for (const p of panes) p.map.invalidateSize({ animate: false, pan: false });
+    return;
+  }
+  if (view3d) { view3d.show(); return; }
+  const p = targetPane(), c = p.map.getCenter();
+  view3dLoading ||= import("./map3d/view3d.js").then((mod) => mod.open({
+    host: $("mapArea"), lang, t, params: new URLSearchParams(location.search), tileVersion,
+    start: { x: Math.round(c.lng), z: Math.round(c.lat), floor: p.floor },
+    markers: () => markers, selected: () => selected, select: (id) => { selected = id; refresh(); },
+    place: place3d, setDest: (id, x, z, floor) => setDest(id, x, z, floor), paste: paste3d,
+    selectedIds: () => (multi.size ? [...multi] : selected != null ? [selected] : []),
+    colorOf, labelOf, showCell,
+  }));
+  view3d = await view3dLoading;
 }
 const modeSeg = () => segOf("data-mode", [["edit", t("edit")], ["review", t("review"), t("reviewHelp")]], mode, setMode, t("modeWord"));
 const labelsSeg = () => segOf("data-labels", [["auto", t("labelsAuto"), t("labelsAutoHelp")], ["always", t("labelsAlways")], ["never", t("labelsNever"), t("labelsNeverHelp")]], labelsMode, setLabels, t("labels"));
@@ -2617,6 +2678,7 @@ function goTo(x, z, floor, id = null) {
   let p = panes.find((q) => q.floor === floor);
   if (!p) { p = targetPane(); setFloor(p, floor); }
   p.map.setView(ll(x, z), Math.max(p.map.getZoom(), 3), { animate: false });
+  if (view3d && viewMode === "3d") view3d.goTo(x, z);   // (the 3D view too, when it is the one shown)
   showCell(x, z, floor);
   if (id != null) selected = id;
   refresh();
@@ -2778,6 +2840,7 @@ async function start() {
   Object.defineProperty(window, "__panes", { get: () => panes });   // the panes now (side by side rebuilds them)
   window.__state = () => ({ markers: clone(markers), nextId, selected, tool, destFor, multi: [...multi], stamp: { ...stamp }, mode, undo: undoStack.length });
   window.addEventListener("resize", drawLinksSoon);
+  if (new URLSearchParams(location.search).get("view") === "3d") setView("3d");
 }
 
 start();

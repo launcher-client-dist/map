@@ -474,3 +474,92 @@ dialog .chkline { background: #141922; border: 1px solid var(--line); border-rad
   #diffBar { top: auto; bottom: 8px; left: 6px; right: 6px; max-width: none; gap: 6px; font-size: 11.5px; }
   #diffBar > b { display: none; }
 }
+
+/* ---- the 3D edit view (map3d/view3d.js): over the map area; the 2D panes and their floating controls wait under it */
+body.v3d #panesBox, body.v3d #floorCard, body.v3d #reachCtl, body.v3d #labelsCtl, body.v3d #diffBar, body.v3d #subtools { visibility: hidden; }
+body:not(.v3d) #view3d { display: none; }
+#view3d { position: absolute; inset: 0; z-index: 1002; overflow: hidden; background: var(--map); }
+#view3d[hidden] { display: none; }
+.v3d-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+.v3d-msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 24px; text-align: center; }
+.v3d-card { position: absolute; background: #171b22eb; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px #0009;
+            padding: 6px; font-size: 13px; z-index: 2; }
+.v3d-k { font-size: 11px; color: var(--muted); padding: 2px 6px 4px; text-transform: uppercase; letter-spacing: .04em; }
+.v3d-sub { font-size: 11.5px; color: var(--muted); padding: 3px 4px 0; }
+.v3d-top { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; gap: 10px; flex-wrap: wrap; pointer-events: none; z-index: 3; }
+.v3d-top .v3d-card { position: static; pointer-events: auto; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.v3d-look .v3d-k { padding: 0 6px 0 4px; }
+.v3d-seg { display: inline-flex; gap: 2px; }
+.v3d-card button { min-height: 30px; padding: 3px 10px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--text); font-size: 13px; }
+.v3d-card button:hover { background: #232a36; }
+.v3d-card button.on { background: var(--accent-soft); color: #fff; border-color: #4c8dff66; }
+.v3d-tgl.on { color: #fff; }
+.v3d-hint { position: absolute; top: 62px; left: 50%; transform: translateX(-50%); z-index: 3; background: #2a2412f2; color: #f5d68a;
+            border: 1px solid #5a4a1a; border-radius: 9px; padding: 5px 12px; font-size: 13px; max-width: calc(100% - 32px); }
+.v3d-hint[hidden] { display: none; }
+.v3d-floors { left: 10px; top: 64px; width: 132px; display: flex; flex-direction: column; gap: 1px; max-height: min(260px, calc(100% - 340px)); overflow: auto; scrollbar-width: thin; }
+.v3d-floors button { text-align: left; display: flex; justify-content: space-between; align-items: center; }
+.v3d-floors .dot { color: #fff; font-size: 9px; }
+.v3d-problems { left: 10px; bottom: 10px; width: 330px; max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 4px; }
+.v3d-prob { display: flex; gap: 8px; align-items: flex-start; background: #1d222b; border-radius: 9px; padding: 6px 8px; }
+.v3d-prob .n { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: #ffe066; color: #000; font-weight: 700; font-size: 12px; }
+.v3d-prob .b { flex: 1; min-width: 0; }
+.v3d-prob .t { font-weight: 600; }
+.v3d-prob.bad .t { color: #ff8a8d; }
+.v3d-prob.warn .t { color: var(--warn); }
+.v3d-prob .s { color: var(--muted); font-size: 12px; }
+.v3d-prob .go { flex: none; color: #8fb6ff; min-height: 24px; padding: 0 6px; font-size: 12px; }
+.v3d-pass { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12.5px; padding: 2px 6px; }
+.v3d-pass i { width: 8px; height: 8px; border-radius: 50%; background: #30c46c; flex: none; }
+.v3d-pass.off i { background: #6b7383; }
+.v3d-minibox { right: 10px; bottom: 132px; }
+.v3d-mini { display: block; width: 240px; height: 150px; border-radius: 8px; cursor: pointer; background: #0b0d11; image-rendering: pixelated; }
+.v3d-place { right: 10px; bottom: 10px; width: 330px; }
+.v3d-tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.v3d-tools button { display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 52px; padding: 4px 2px; font-size: 12px; background: #1d222b; }
+.v3d-tools button .g { font-size: 18px; line-height: 1; }
+.v3d-tools button.on { box-shadow: inset 0 0 0 2px var(--accent); }
+.v3d-key { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); padding: 6px 4px 0; }
+.v3d-key i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.v3d-tip { position: absolute; z-index: 4; pointer-events: none; background: #11151bf2; border: 1px solid var(--line); border-radius: 9px;
+           padding: 6px 9px; font-size: 12.5px; max-width: 290px; box-shadow: 0 8px 24px #000a; }
+.v3d-tip[hidden] { display: none; }
+.v3d-tip .t.ok b { color: #30c46c; } .v3d-tip .t.warn b { color: var(--warn); } .v3d-tip .t.bad b { color: #ff6b6f; }
+.v3d-tip .t.ok { border-left: 3px solid #30c46c; padding-left: 6px; }
+.v3d-tip .t.warn { border-left: 3px solid var(--warn); padding-left: 6px; }
+.v3d-tip .t.bad { border-left: 3px solid var(--danger); padding-left: 6px; }
+.v3d-tip .r { color: #d6dae2; margin-top: 2px; }
+.v3d-tip .a { color: #8fb6ff; margin-top: 4px; }
+.v3d-status { position: absolute; top: 62px; right: 12px; z-index: 3; color: var(--muted); font-size: 12px; background: #171b22d0; border-radius: 8px; padding: 3px 8px; }
+.v3d-status[hidden] { display: none; }
+.v3d-pins { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.v3d-pin { position: absolute; transform: translate(-50%, -100%); width: 26px; height: 26px; border-radius: 50%; background: #ffe066; color: #000;
+           font-weight: 800; font-size: 14px; display: grid; place-items: center; border: 2px solid #000; box-shadow: 0 2px 6px #000a; }
+.v3d-pin.warn { background: #f5a524; }
+@media (max-width: 720px) {
+  .v3d-problems { width: calc(100% - 20px); max-height: 150px; bottom: 96px; }
+  .v3d-place { width: calc(100% - 20px); }
+  .v3d-minibox, .v3d-floors { display: none; }
+}
+/* the canvas alone (?clean=1: close-up pictures) */
+#view3d.clean .v3d-card, #view3d.clean .v3d-top, #view3d.clean .v3d-hint, #view3d.clean .v3d-tip, #view3d.clean .v3d-status { display: none !important; }
+/* the floor slider (top: all floors) with its stops beside it, the section cut under it */
+.v3d-floors { width: 168px; max-height: none; overflow: visible; }
+.v3d-floorpick { display: flex; gap: 6px; align-items: stretch; }
+.v3d-vslider { writing-mode: vertical-lr; direction: rtl; width: 22px; min-height: 120px; accent-color: var(--accent); margin: 2px 0; }
+.v3d-stops { display: flex; flex-direction: column; flex: 1; gap: 1px; max-height: min(230px, calc(100vh - 520px)); overflow: auto; scrollbar-width: thin; }
+.v3d-stops button { text-align: left; min-height: 24px; padding: 1px 8px; font-size: 12.5px; display: flex; justify-content: space-between; align-items: center; }
+.v3d-stops .dot { font-size: 9px; }
+.v3d-hslider { width: 100%; accent-color: var(--warn); }
+.v3d-k.sep { margin-left: 8px; }
+.v3d-card button.v3d-q { font-weight: 700; min-width: 30px; }
+.v3d-tools button kbd { font-size: 10px; color: var(--muted); }
+.v3d-help { position: absolute; z-index: 6; top: 64px; left: 50%; transform: translateX(-50%); background: #171b22f5; border: 1px solid var(--line);
+            border-radius: 12px; box-shadow: 0 12px 32px #000c; padding: 10px 14px; min-width: 360px; font-size: 13px; }
+.v3d-help[hidden] { display: none; }
+.v3d-help .hd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.v3d-help .hd button { background: transparent; border: 0; color: var(--muted); font-size: 18px; min-height: 0; }
+.v3d-help td { padding: 3px 8px 3px 0; vertical-align: top; }
+.v3d-help td:first-child { white-space: nowrap; }
+.v3d-help kbd, .v3d-tools kbd { display: inline-block; background: #0e1116; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+            padding: 0 6px; margin-right: 4px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--text); }

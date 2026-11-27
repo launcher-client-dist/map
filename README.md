@@ -89,6 +89,50 @@ and posts the new link (with its list of changes) back in their ticket.
   destination set, moved or removed, and a rope made two-way (or one-way).
 - **Language:** Português, English, Español, 中文 (`?lang=pt|en|es|zh`, else the browser's).
 
+## The 3D edit view
+
+**2D | 3D** in the bar opens the 3D view of the same map (`map3d/view3d.js`, loaded on the first switch; three.js
+0.170.0 from cdnjs, pinned with SRI through the page's import map). It is an editor of the same markers: what is
+placed there is a marker of the page (undo, the panel, Share and the link work as in 2D), so the link a mapper sends
+is the one the 2D page makes.
+
+- **Ground:** the server's own blocks (what the server walks on), the game's camera.
+- **Look:** **Placement check** (C: the cell under the cursor green / yellow / red with the reason; the markers checked,
+  the bad ones seen through what hides them); **Invisible walls** (I: the hidden blocks, and in pink the walls'
+  insides the server refuses); **Height and floor** (H: every block's top green where a player can stand, lighter the
+  higher, amber on an edge or a slope, hatched red where nobody can; a red strip on each side the walk can't step
+  over; the tip says the height).
+- **Objects** (M): **Markers** (a shaped marker per kind in its colour; a spawn shows the cells its radius covers, the
+  monster's icon and how many) or **Models** (the game's own models of the rope post, hole, portal, lever, every
+  monster a spawn or a boss can name, a figure for an NPC, with a ring and a label; markers again when zoomed out).
+  Areas are drawn as their cells, routes as a line.
+- **Camera:** ⟲ ⟳ 90° (Q, E), + / −, the wheel; drag to move; right-drag (or Shift-drag) turns and tilts (F: free
+  view); **See as the player** (P) goes back.
+- **Floor:** a slider (PageUp / PageDown, `]` / `[`, 0 for all floors), its stops beside it: everything above the
+  floor is cut away, as the game hides what is over its character. **Cut** (`,` / `.`): the height the blocks are
+  sliced at inside the floor, like a section, to look into walls and rooms.
+- **Place** (1 rope post, 2 portal pair, 3 landing, 4 spawn): Rope post (then a click where the player lands), Portal
+  pair (the portal, then where it takes the player), Landing (for the selected rope, hole or portal), Spawn (the
+  stamp's monster, count and radius). A marker takes the floor of the layer clicked (the floor the 2D page and `/pos`
+  call it).
+- **Copy, paste:** Ctrl+C copies the selected markers (one, or several with Shift+click), Ctrl+V puts a copy at the
+  cell under the cursor, on its floor (one undo step).
+- **The map's blocks:** a click on a wall, an object or a roof shows the whole thing (its blocks, size and heights);
+  Alt+click one block. They are shown, not edited.
+- **Problems:** each marker's spot and landing checked against the grid (water, inside a wall or an object, an
+  invisible wall, lava, void, a roof, closed in; edges and slopes in yellow), **Go to ›** each, and what passed
+  counted. The corner map is the 2D map (a click goes there). **?** lists the keys.
+- **Address:** `?view=3d&at=x,z` opens it there; `objects=a`, `check=0`, `walls=1`, `tops=1`, `floor=-6`, `cut=-4`,
+  `yaw=90`, `zoom=1.5`, `pitch=40` (free view), `tool=rope`, `hover=x,z` (the check's tip on that cell), `help=1`,
+  `clean=1` (the canvas alone: for pictures).
+- **Data** (`map3d/`, written by the staff tools' exporter): `meta.json` (the codes, the floors, the chunks there
+  are); `c/<a>_<b>.bin.gz` the server's blocks of chunk (a, b) (16 x 16 cells: x in [16a - 8, 16a + 8)) and each
+  standing layer's verdict, gzipped (the format at the top of `map3d/cdata.js`; the page unpacks it); `objects/`:
+  `objects.json`, the models (`<kind>.glb.gz`, `a<actor type>.glb.gz`: glTF binary, positions quantized, a colour per
+  vertex, gzipped) and a 64 px icon per monster. Files: `map3d/cdata.js` (the grid and the check, no DOM),
+  `map3d/glb.js` (the models' reader, no DOM), `map3d/objects3d.js` (markers and models), `map3d/words3d.js` (the
+  words), `tests/map3d.test.mjs` (in `npm test`), `tests/map3d.e2e.mjs` (Edge, clicks: `npm run e2e3d`).
+
 ## The link
 
 Everything is in the URL `#fragment` (never sent to the server): `#2.` + base64url(the payload), `2` being the format
