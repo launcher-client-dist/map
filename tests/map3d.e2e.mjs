@@ -428,6 +428,46 @@ try {
   const afterOffer = await js("window.__v3d.state()");
   assert.ok(afterOffer.tool === "ramp" && afterOffer.ramp && afterOffer.ramp.a.x === 216 && afterOffer.ramp.a.f === -3, "the Ramp tool starts at the far bank: " + JSON.stringify(afterOffer.ramp));
   console.log("bridge: placed by clicks, green, in the link, undo/redo, copy/paste; the prefab list; the ramp offer");
+  // a fill by clicks: the Fill tool (7), plain planks from its block list, the low bank by the swamp portal (217, -134)
+  // and the portal's side (229, -136): the fewest cells to fill between them (5, with turns), it walks both ways
+  // (green); the link holds its corners and its block; undo / redo
+  await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=223,-135&zoom=0.9&yaw=180&pitch=50` });
+  let fillUp = false;
+  for (let i = 0; i < 120 && !fillUp; i++) {
+    await sleep(500);
+    try {
+      const r = await cdp("Runtime.evaluate", { returnByValue: true, expression: `(() => { const v = window.__v3d; return !!(v && document.querySelector("#view3d")?.dataset.ready === "1" && v.state().chunks > 0); })()` });
+      fillUp = r.result?.value === true;
+    } catch { /* (between two documents) */ }
+  }
+  assert.ok(fillUp, "the 3D view opened again for the fill");
+  await sleep(1500);
+  await key("7", "Digit7", 55);
+  assert.equal((await js("window.__v3d.state()")).tool, "fill", "7 arms the Fill tool");
+  await js(`(() => { const s = document.querySelector('[data-fblock]'); s.value = "planks"; s.dispatchEvent(new Event("change")); })()`);
+  assert.equal((await js("window.__v3d.state()")).fillBlock, "planks", "the block list sets the block");
+  const fa = await js(`window.__v3d.screenOf(217, -134, "s", -5)`), fb = await js(`window.__v3d.screenOf(229, -136, "s", -5)`);
+  await clickAt(fa.x, fa.y);
+  await moveTo(fb.x, fb.y);
+  await sleep(200);
+  const fp = (await js("window.__v3d.state()")).ramp;
+  assert.ok(fp && fp.kind === "fill" && fp.ok === true, "the fill's preview walks both ways: " + JSON.stringify(fp));
+  assert.match(await js(`document.querySelector(".v3d-hint").textContent`), /Fill \(Planks\), 5 cells: walks both ways/);
+  await shot("fill_preview.png");
+  await clickAt(fb.x, fb.y);
+  await sleep(700);
+  const fill = (await js("window.__state()")).markers.find((m) => m.kind === "fill");
+  assert.ok(fill, "a fill was placed");
+  assert.deepEqual([fill.points[0], fill.points[fill.points.length - 1], fill.fields.lo, fill.fields.hi, fill.fields.pieces], [[218, -134], [223, -137], -5, -5, "planks|1|5"]);
+  const fst = (await js("window.__v3d.state()")).fills;
+  assert.ok(fst.length === 1 && fst[0].ok === true && fst[0].cells === 5, "the placed fill walks: " + JSON.stringify(fst));
+  assert.deepEqual((await decode(await js("location.hash"))).markers.find((m) => m.kind === "fill"), fill, "the link holds the fill");
+  await shot("fill_placed.png");
+  await key("z", "KeyZ", 90, 2);
+  assert.equal((await js("window.__state()")).markers.filter((m) => m.kind === "fill").length, 0, "undo");
+  await key("y", "KeyY", 89, 2);
+  assert.equal((await js("window.__state()")).markers.filter((m) => m.kind === "fill").length, 1, "redo");
+  console.log("fill: placed by clicks, the fewest cells (5), green, in the link, the block list, undo/redo");
   console.log("main flow passed", new Date().toISOString());
   // one view on DevTools' "Fast 3G" network (562.5 ms latency, ~180 KB/s down), the cache off, as a first visit: how
   // long until every chunk in view is drawn (the page, three.js, the data); a number for the report, not a limit
@@ -453,7 +493,7 @@ try {
   await cdp("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
   assert.ok(loaded, "the view loaded on Fast 3G");
   console.log(`fast 3G: one view (the street, look ${loaded.look}, ${loaded.chunks} chunks) drawn in ${(ms3g / 1000).toFixed(1)} s, ${(netBytes / 1e6).toFixed(2)} MB over the network`);
-  console.log("ok: a bridge placed by clicks walks green and round trips; a ramp placed by clicks walks green and round trips; rope post + landing placed by clicks, a spawn in the canal flagged red, the link round trip holds them; copy/paste, whole roof / one block, the keys; W A S D move along the view's heading; the floor and cut sliders held while dragged");
+  console.log("ok: a fill placed by clicks walks green and round trips; a bridge placed by clicks walks green and round trips; a ramp placed by clicks walks green and round trips; rope post + landing placed by clicks, a spawn in the canal flagged red, the link round trip holds them; copy/paste, whole roof / one block, the keys; W A S D move along the view's heading; the floor and cut sliders held while dragged");
 } catch (e) {
   failed = true;
   console.error("FAIL", e);

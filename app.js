@@ -47,6 +47,9 @@ const KIND_UI = {
   // a ramp (placed in the 3D view, where the heights are): an arrow from its low end up to its high end
   ramp: { color: "#b8860b", svg: svg('<path d="M1.8 13.5h12.4"/><path d="M2.5 13.5 13.5 5.5v8"/><path d="M5.2 7.6 9.2 4.8M7.2 4.6l2 .2-.4 2"/>'),
     fields: { label: { input: "text" } } },
+  // a fill (placed in the 3D view): blocks closing a gap between two areas at the same level
+  fill: { color: "#5f8f3e", svg: svg('<path d="M1.5 11.5h4v-4h5v4h4"/><path d="M5.5 11.5h5M5.5 9.5h5" stroke-width="1.2"/><path d="M1.5 14h13" stroke-width="1"/>'),
+    fields: { label: { input: "text" } } },
   // a bridge (placed in the 3D view): planks between its two banks
   bridge: { color: "#8a5a2b", svg: svg('<path d="M1.5 6.5h13M1.5 10.5h13"/><path d="M4 6.5v4M7 6.5v4M10 6.5v4M13 6.5v4"/><path d="M3 10.5v3.5M13 10.5v3.5"/>'),
     fields: { label: { input: "text" } } },
@@ -1440,6 +1443,11 @@ function renderPanel() {
     const run = p0 && p1 ? Math.max(Math.abs(p1[0] - p0[0]), Math.abs(p1[1] - p0[1])) : 0;
     body.append(el("div", { class: "note", "data-act": "ramp-info" }, t("rampInfo", rampRise(m) || "?", run, +f.width || 1, f.ground ? t("ground." + f.ground) : "?")));
   }
+  if (m.kind === "fill") {
+    // what fills it and how many cells (set in the 3D view, where the heights are)
+    const f = m.fields || {}, [blk, , cells] = String(f.pieces || "").split("|");
+    body.append(el("div", { class: "note", "data-act": "fill-info" }, t("fillInfo", cells || "?", blk ? t3("fb." + blk) : "?", +f.width || 1)));
+  }
   if (m.kind === "bridge") {
     // how long and wide (set in the 3D view, where the heights are)
     const f = m.fields || {}, [p0, p1] = m.points || [];
@@ -2293,6 +2301,18 @@ function placeBridge3d(points, floor, fields) {
   });
   return id;
 }
+// the 3D view's fill: its path's corners and its fields (map3d/fill.js fieldsOfFill); one undo step, selected
+function placeFill3d(points, floor, fields) {
+  let id = null;
+  if (mode !== "edit") return null;
+  commit(() => {
+    const m = newMarker("fill", floor, { points });
+    Object.assign(m.fields, fields);
+    markers.push(m);
+    selected = id = m.id;
+  });
+  return id;
+}
 // a change the 3D view makes to one marker (a ramp's width): one undo step
 function edit3d(id, fn) {
   if (mode !== "edit") return;
@@ -2335,7 +2355,7 @@ async function setView(v) {
     host: $("mapArea"), lang, t, params: new URLSearchParams(location.search), tileVersion,
     start: { x: Math.round(c.lng), z: Math.round(c.lat), floor: p.floor },
     markers: () => markers, selected: () => selected, select: (id) => { selected = id; refresh(); },
-    place: place3d, setDest: (id, x, z, floor) => setDest(id, x, z, floor), paste: paste3d, placeRamp: placeRamp3d, placeBridge: placeBridge3d, edit: edit3d,
+    place: place3d, setDest: (id, x, z, floor) => setDest(id, x, z, floor), paste: paste3d, placeRamp: placeRamp3d, placeBridge: placeBridge3d, placeFill: placeFill3d, edit: edit3d,
     selectedIds: () => (multi.size ? [...multi] : selected != null ? [selected] : []),
     colorOf, labelOf, showCell,
   }));

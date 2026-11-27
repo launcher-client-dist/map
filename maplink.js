@@ -119,6 +119,9 @@ export const KINDS = [
   // 1..3 (bare planks, gap filler); pieces: "<N|E|S|W>|<prefab>|<length>|<width>|<segments>": a stock bridge of the game
   // (map3d/bridge_prefabs.json) stretched by whole segments (map3d/bridge.js: encodeBridge)
   { name: "bridge", geometry: "line", fields: [["label", "str"], ["lo", "int"], ["hi", "int"], ["width", "int"], ["pieces", "str"]], extra: [FLAG_F] },
+  // a fill proposal (the 3D editor's Fill): points: the path's corners, from one area to the other; lo, hi: the cube each
+  // end stands on (the same level); width 1..3; pieces: "<block>|<width>|<cells>" (map3d/fill.js: encodeFill)
+  { name: "fill", geometry: "line", fields: [["label", "str"], ["lo", "int"], ["hi", "int"], ["width", "int"], ["pieces", "str"]], extra: [FLAG_F] },
 ];
 export const KIND_CODE = Object.fromEntries(KINDS.map((k, i) => [k.name, i]));
 // The colours an area or a portal can wear, by the index the color field holds (append only; 0 is never written: no

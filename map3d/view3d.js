@@ -13,6 +13,7 @@ import { createObjects, unpack } from "./objects3d.js";
 import { moveKey, moveStep } from "./move.js";
 import * as RP from "./ramp.js";
 import * as BR from "./bridge.js";
+import * as FL from "./fill.js";
 
 const BASE = new URL("./", import.meta.url);
 // the game's camera (the staff tools' gamecam.py, measured on the real client): FOV 25° vertical, pitched 57° down, the
@@ -67,7 +68,8 @@ export async function open(api) {
     tool: null, pending: null, hover: null, clip: [], asset: null,
     // (the ramp or bridge being placed: its kind, first end, plan and check; each kind's width)
     ramp: null, rampWidth: Math.min(3, Math.max(1, +q.get("rampw") || 2)), bridgeWidth: Math.min(3, Math.max(1, +q.get("bridgew") || 1)),
-    bridgePrefab: q.get("bpre") || "swamp",   // (a bridge's prefab: one of the stock bridges, map3d/bridge_prefabs.json; or bare planks)
+    bridgePrefab: q.get("bpre") || "swamp",
+    fillBlock: q.get("fblock") || "planksRail", fillWidth: Math.min(3, Math.max(1, +q.get("fillw") || 1)),   // (the fill's block or set; its width)   // (a bridge's prefab: one of the stock bridges, map3d/bridge_prefabs.json; or bare planks)
   };
   const OBJ = createObjects(THREE, { base: BASE, t: api.t, onChange: () => paintMarkersSoon() });
   // the bridge prefabs (the stock bridges as records, map3d/bridge_prefabs.json): loaded once, the bridges drawn again then
@@ -463,7 +465,7 @@ export async function open(api) {
       const walk = LINE[m.kind].check(plan);
       rampDraw.push([m, plan, walk]);
       if (!walk) { problems.passed.unloaded = (problems.passed.unloaded || 0) + 1; continue; }
-      const pk = m.kind === "bridge" ? "bridges" : "ramps";
+      const pk = m.kind === "bridge" ? "bridges" : m.kind === "fill" ? "fills" : "ramps";
       if (walk.ok) { problems.passed[pk] = (problems.passed[pk] || 0) + 1; continue; }
       const r0 = walk.reasons.find((r) => "x" in r) || {};
       problems.problems.unshift({ id: m.id, kind: m.kind, end: m.kind, x: r0.x ?? plan.lo.x, z: r0.z ?? plan.lo.z, floor: m.floor, level: "bad",
@@ -684,6 +686,13 @@ export async function open(api) {
     if (walk.ok) return t3("bridgeOk", name, plan.run, plan.segments);
     return t3("bridgeBad", name, plan.run, walk.reasons.slice(0, 2).map((r) => BR.bridgeReason(r, t3)).join("; "));
   }
+  function fillWords(plan, walk) {
+    const name = t3("fb." + plan.block);
+    if (!walk) return t3("fillBad", name, plan.cells.length, t3("unloaded", 1));
+    if (walk.ok && !plan.cells.length) return t3("fillBad", name, 0, FL.fillReason({ code: "noGap" }, t3));   // (already joined)
+    if (walk.ok) return t3("fillOk", name, plan.cells.length);
+    return t3("fillBad", name, plan.cells.length, walk.reasons.slice(0, 2).map((r) => FL.fillReason(r, t3)).join("; "));
+  }
   // the two-end kinds: how each plans, checks, draws, words and stores itself
   const LINE = {
     ramp: { plan: (a, b, w) => RP.planRamp(a, b, w, cellAt), check: rampCheck, group: rampGroup, words: rampWords,
@@ -694,9 +703,15 @@ export async function open(api) {
       fields: (p) => BR.fieldsOfBridge(p), ofMarker: (m) => BR.planOfBridge(m, cellAt, PREFABS), reason: BR.bridgeReason,
       placed: () => t3("bridgePlaced"), end: "bridgeEnd", passed: "passedBridges", high: "hint.bridgeFar", hint: "hint.bridge",
       ends: (p) => [p.lo, p.hi] },
+    // the fill: the fewest cells between two areas at one level, with a chosen block (its path's corners are its points)
+    fill: { plan: (a, b, w, blk = S.fillBlock) => FL.planFill(a, b, w, cellAt, blk), check: (p) => (loaded(p) ? FL.walkFill(p, cellAt, layerAtF) : null),
+      group: bridgeGroup, words: fillWords, fields: (p) => FL.fieldsOfFill(p), ofMarker: (m) => FL.planOfFill(m, cellAt), reason: FL.fillReason,
+      placed: () => t3("fillPlaced"), end: "fillEnd", passed: "passedFills", high: "hint.fillFar", hint: "hint.fill",
+      ends: (p) => [p.lo, p.hi], points: FL.pointsOfFill },
   };
+  const pointsOf = (kind, plan) => (LINE[kind].points ? LINE[kind].points(plan) : [[plan.lo.x, plan.lo.z], [plan.hi.x, plan.hi.z]]);
   const isLine = (k) => k in LINE;
-  const widthOf = (k) => (k === "bridge" ? S.bridgeWidth : S.rampWidth);
+  const widthOf = (k) => (k === "bridge" ? S.bridgeWidth : k === "fill" ? S.fillWidth : S.rampWidth);
   const rampG = new THREE.Group();   // the ramp or bridge being placed
   world.add(rampG);
   function rampEnd(pk) { return pk && pk.layer ? { x: pk.x, z: pk.z, f: pk.layer.f, floor: pk.layer.floor } : null; }
@@ -712,12 +727,21 @@ export async function open(api) {
     const l = c.layers.filter((q) => !(q.bad & CD.BAD.roof)).reduce((p, q) => (!p || Math.abs(q.f - want) < Math.abs(p.f - want) ? q : p), null) || c.layers[0];
     return { x, z, f: l.f, floor: l.floor };
   }
+  // the far end under the cursor: a ramp's or bridge's on the straight line from the first end; a fill's where it
+  // points (its path turns), on the layer there nearest the first end's height
+  function farEnd(a, pk) {
+    if (S.ramp?.kind !== "fill") return rampFar(a, pk);
+    const c = pk && cellAt(pk.x, pk.z);
+    if (!c || !c.layers.length) return null;
+    const l = pk.layer || c.layers.reduce((p, q) => (Math.abs(q.f - a.f) < Math.abs(p.f - a.f) ? q : p));
+    return { x: pk.x, z: pk.z, f: l.f, floor: l.floor };
+  }
   // the hint of a check; a bridge whose banks differ offers the ramp it needs at the far bank (the Ramp tool, its first
   // end there)
   function lineHint(kind, plan, walk, prefix = "") {
     showHint(prefix + LINE[kind].words(plan, walk));
     hint.dataset.level = walk?.ok ? "ok" : "bad";
-    const un = kind === "bridge" && plan.problems.find((p) => p.code === "uneven");
+    const un = kind !== "ramp" && plan.problems.find((p) => p.code === "uneven");
     if (un) hint.append(" ", h("button", { type: "button", class: "v3d-offer", "data-act": "ramp-offer", onclick: () => offerRamp(plan) }, t3("rampOffer")));
   }
   function offerRamp(plan) {
@@ -755,8 +779,8 @@ export async function open(api) {
     if (kind === "bridge") b = snapFar(a, b, S.bridgePrefab);
     if (!a || !b || (a.x === b.x && a.z === b.z)) return false;
     const plan = LINE[kind].plan(a, b, widthOf(kind)), walk = LINE[kind].check(plan);
-    const place = kind === "bridge" ? api.placeBridge : api.placeRamp;
-    const id = place ? place([[plan.lo.x, plan.lo.z], [plan.hi.x, plan.hi.z]], plan.lo.floor || a.floor, LINE[kind].fields(plan)) : null;
+    const place = kind === "bridge" ? api.placeBridge : kind === "fill" ? api.placeFill : api.placeRamp;
+    const id = place ? place(pointsOf(kind, plan), plan.lo.floor || a.floor, LINE[kind].fields(plan)) : null;
     S.ramp = null;
     disposeGroup(rampG);
     if (id != null) lineHint(kind, plan, walk, LINE[kind].placed(plan) + " · "); else showHint("");
@@ -766,14 +790,15 @@ export async function open(api) {
   // planned again
   function refitRamp(m) {
     if (!isLine(m.kind) || !m.points || m.points.length < 2) return m;
-    const [[x0, z0], [x1, z1]] = m.points, c0 = cellAt(x0, z0);
+    const [x0, z0] = m.points[0], [x1, z1] = m.points[m.points.length - 1], c0 = cellAt(x0, z0);
     const l0 = c0 && CD.layerFor(c0, m.floor);
     if (!l0) return m;
     const rise = (+m.fields.hi || 0) - (+m.fields.lo || 0);
     const b = rampFar({ x: x0, z: z0, f: l0.f }, { x: x1, z: z1, y: l0.f + rise, layer: null });
     if (!b) return m;
-    const plan = LINE[m.kind].plan({ x: x0, z: z0, f: l0.f, floor: l0.floor }, b, +m.fields.width || 1, m.kind === "bridge" ? BR.presetOf(m.fields.pieces) : undefined);
-    m.points = [[plan.lo.x, plan.lo.z], [plan.hi.x, plan.hi.z]];
+    const extra = m.kind === "bridge" ? BR.presetOf(m.fields.pieces) : m.kind === "fill" ? FL.blockOfPieces(m.fields.pieces) : undefined;
+    const plan = LINE[m.kind].plan({ x: x0, z: z0, f: l0.f, floor: l0.floor }, b, +m.fields.width || 1, extra);
+    m.points = pointsOf(m.kind, plan);
     m.fields = { ...m.fields, ...LINE[m.kind].fields(plan) };
     return m;
   }
@@ -830,7 +855,7 @@ export async function open(api) {
 
   function paintStatus() { status.hidden = loadingN === 0; status.textContent = t3("loading"); root.dataset.ready = loadingN === 0 && chunks.size ? "1" : "0"; }
 
-  const TOOLS = [["rope", "p.rope", "#ff7a1a", "⚓"], ["portal", "p.portal", "#8e4ec6", "◎"], ["landing", "p.landing", "#30c46c", "⬇"], ["spawn", "p.spawn", "#e5322d", "⚔"], ["ramp", "p.ramp", "#d9a521", "◢"], ["bridge", "p.bridge", "#b07a43", "≡"]];
+  const TOOLS = [["rope", "p.rope", "#ff7a1a", "⚓"], ["portal", "p.portal", "#8e4ec6", "◎"], ["landing", "p.landing", "#30c46c", "⬇"], ["spawn", "p.spawn", "#e5322d", "⚔"], ["ramp", "p.ramp", "#d9a521", "◢"], ["bridge", "p.bridge", "#b07a43", "≡"], ["fill", "p.fill", "#7fb069", "▦"]];
   function paintPlace() {
     placeBox.replaceChildren(h("div", { class: "v3d-k" }, t3("place")),
       h("div", { class: "v3d-tools" }, TOOLS.map(([k, w, c, g], i) => h("button", { type: "button", "data-place": k, class: S.tool === k ? "on" : "", title: t3(w) + " (" + (i + 1) + ")", onclick: () => setTool(S.tool === k ? null : k) },
@@ -844,7 +869,16 @@ export async function open(api) {
     const selRamp = m && isLine(m.kind) ? m : null;
     if (!isLine(S.tool) && !selRamp) return null;
     const now = selRamp && !isLine(S.tool) ? +selRamp.fields?.width || 1 : widthOf(S.tool);
-    const bridge = isLine(S.tool) ? S.tool === "bridge" : selRamp.kind === "bridge";
+    const kindNow = isLine(S.tool) ? S.tool : selRamp.kind;
+    if (kindNow === "fill") {   // the fill: its width and its block (or set)
+      const blk = selRamp && !isLine(S.tool) ? FL.blockOfPieces(selRamp.fields?.pieces) : S.fillBlock;
+      return h("div", { class: "v3d-rampw", title: t3("rampWidthHelp") }, h("span", { class: "v3d-k" }, t3("rampWidth")),
+        pill("data-rampw", [[1, "1"], [2, "2"], [3, "3"]], now, (v) => setRampWidth(+v, isLine(S.tool) ? null : selRamp)),
+        h("div", { class: "v3d-prefabs" }, h("span", { class: "v3d-k" }, t3("fBlock")),
+          h("select", { "data-fblock": "1", title: t3("fBlockHelp"), onchange: (e) => setFillBlock(e.target.value, isLine(S.tool) ? null : selRamp) },
+            FL.BLOCKS.map((b) => { const o = h("option", { value: b.id }, t3("fb." + b.id)); if (b.id === blk) o.selected = true; return o; }))));
+    }
+    const bridge = kindNow === "bridge";
     const pre = selRamp && !isLine(S.tool) ? BR.presetOf(selRamp.fields?.pieces) : S.bridgePrefab;
     const widthRow = !bridge || pre === "plain" || pre === "gapFill" ? [h("span", { class: "v3d-k" }, t3("rampWidth")), pill("data-rampw", [[1, "1"], [2, "2"], [3, "3"]], now, (v) => setRampWidth(+v, isLine(S.tool) ? null : selRamp))] : [];
     const list = [...PREFABS.map((q) => q.id), "gapFill", "plain"];
@@ -852,6 +886,17 @@ export async function open(api) {
       bridge ? h("div", { class: "v3d-prefabs" }, h("span", { class: "v3d-k" }, t3("bPrefab")),
         h("select", { "data-bpre": "1", title: t3("bPrefabHelp"), onchange: (e) => setBridgeStyle(e.target.value, isLine(S.tool) ? null : selRamp) },
           list.map((id) => { const o = h("option", { value: id }, t3("bp." + id)); if (id === pre) o.selected = true; return o; }))) : null);
+  }
+  // a fill's block (or set): the one being placed, or the selected fill's (planned again along its own path)
+  function setFillBlock(v, m) {
+    if (m && api.edit) {
+      const plan = FL.planOfFill({ ...m, fields: { ...m.fields, pieces: `${v}|${+m.fields.width || 1}|0` } }, cellAt);
+      if (plan) api.edit(m.id, (n) => { n.fields = { ...n.fields, ...FL.fieldsOfFill(plan) }; });
+    } else {
+      S.fillBlock = v;
+      if (S.ramp?.b) previewRamp(S.ramp.b);
+    }
+    paintPlace();
   }
   // a bridge's prefab (a stock bridge of the game, or bare planks): the one being placed, or the selected bridge's
   // (planned again on its ends, the far one moved to a length the prefab can take)
@@ -871,10 +916,11 @@ export async function open(api) {
     if (m && api.edit) {   // the selected one: planned again at this width on its own ends
       const plan = m.kind === "bridge"
         ? BR.planBridge({ x: m.points[0][0], z: m.points[0][1], f: +m.fields.lo }, { x: m.points[1][0], z: m.points[1][1], f: +m.fields.hi }, w, cellAt, prefabOf(BR.presetOf(m.fields.pieces)))
+        : m.kind === "fill" ? FL.planOfFill({ ...m, fields: { ...m.fields, width: w, pieces: `${FL.blockOfPieces(m.fields.pieces)}|${w}|0` } }, cellAt)
         : LINE[m.kind].ofMarker({ ...m, fields: { ...m.fields, width: w, pieces: "" } });
       if (plan) api.edit(m.id, (n) => { n.fields = { ...n.fields, ...LINE[m.kind].fields(plan) }; });
     } else {
-      if (S.tool === "bridge") S.bridgeWidth = w; else S.rampWidth = w;
+      if (S.tool === "bridge") S.bridgeWidth = w; else if (S.tool === "fill") S.fillWidth = w; else S.rampWidth = w;
       if (S.ramp?.b) previewRamp(S.ramp.b);
     }
     paintPlace();
@@ -1005,7 +1051,7 @@ export async function open(api) {
   // the keyboard: one key each (nothing while typing in a field); "?" lists them
   const KEYS = [["PageUp  ]", "kFloorUp"], ["PageDown  [", "kFloorDown"], ["0", "kFloorAll"], [",  .", "kCut"],
     ["W  A  S  D", "kMove"], ["Q  E", "kRotate"], ["+  −", "kZoom"], ["P", "kPlayer"], ["F", "kFree"], ["C", "kCheck"], ["H", "kTops"], ["I", "kWalls"],
-    ["M", "kObjects"], ["1  2  3  4", "kPlace"], ["5", "kPlaceRamp"], ["6", "kPlaceBridge"], ["Ctrl+C  Ctrl+V", "kCopy"], ["kAltClick", "kBlock"], ["Esc", "kEsc"], ["?", "kHelp"]];
+    ["M", "kObjects"], ["1  2  3  4", "kPlace"], ["5", "kPlaceRamp"], ["6", "kPlaceBridge"], ["7", "kPlaceFill"], ["Ctrl+C  Ctrl+V", "kCopy"], ["kAltClick", "kBlock"], ["Esc", "kEsc"], ["?", "kHelp"]];
   function toggleHelp(on = !S.help) {
     S.help = on;
     helpBox.hidden = !on;
@@ -1031,6 +1077,7 @@ export async function open(api) {
     if (pass.landings) ok.push(h("div", { class: "v3d-pass" }, h("i"), t3("passedLandings", pass.landings)));
     if (pass.ramps) ok.push(h("div", { class: "v3d-pass" }, h("i"), t3("passedRamps", pass.ramps)));
     if (pass.bridges) ok.push(h("div", { class: "v3d-pass" }, h("i"), t3("passedBridges", pass.bridges)));
+    if (pass.fills) ok.push(h("div", { class: "v3d-pass" }, h("i"), t3("passedFills", pass.fills)));
     if (pass.unloaded) ok.push(h("div", { class: "v3d-pass off" }, h("i"), t3("unloaded", pass.unloaded)));
     if (!P.length && !ok.length) ok.push(h("div", { class: "v3d-sub" }, t3("nothingChecked")));
     probBox.replaceChildren(h("div", { class: "v3d-k" }, P.length ? t3("problems", P.length) : t3("problems0")), ...rows, ...ok);
@@ -1124,7 +1171,7 @@ export async function open(api) {
   world.add(hoverMesh, hoverEdge);
   function showHover(pk) {
     S.hover = pk;
-    if (isLine(S.tool) && S.ramp?.a && pk) previewRamp(rampFar(S.ramp.a, pk));
+    if (isLine(S.tool) && S.ramp?.a && pk) previewRamp(farEnd(S.ramp.a, pk));
     if (!pk) { hoverMesh.visible = hoverEdge.visible = false; tipBox.hidden = true; draw(); return; }
     const y = (pk.layer ? pk.layer.f : pk.cube ? pk.cube.y : pk.y) + 0.04;
     for (const m of [hoverMesh, hoverEdge]) { m.position.set(pk.x, y, pk.z); m.visible = S.check || !!S.tool; }
@@ -1149,7 +1196,7 @@ export async function open(api) {
   function click(pk, e) {
     if (isLine(S.tool) && pk) {   // the first click: one end (a ramp's low end, a bridge's bank); the second: the other, placed
       if (!S.ramp) { const a = rampEnd(pk); if (a) { S.ramp = { kind: S.tool, a }; showHint(t3(LINE[S.tool].high)); previewRamp(null); } return; }
-      finishRamp(rampFar(S.ramp.a, pk));
+      finishRamp(farEnd(S.ramp.a, pk));
       return;
     }
     if (S.tool && pk && pk.layer) {
@@ -1175,11 +1222,13 @@ export async function open(api) {
     if (pk) {
       let best = null, bd = 1.6;
       for (const m of api.markers()) {
-        if (isLine(m.kind) && m.points?.length >= 2) {   // a ramp or bridge: the nearest point of its line
-          const [[x0, z0], [x1, z1]] = m.points, L2 = (x1 - x0) ** 2 + (z1 - z0) ** 2 || 1;
-          const u = Math.min(1, Math.max(0, ((pk.x - x0) * (x1 - x0) + (pk.z - z0) * (z1 - z0)) / L2));
-          const d = Math.hypot(x0 + u * (x1 - x0) - pk.x, z0 + u * (z1 - z0) - pk.z);
-          if (d < bd) { bd = d; best = m; }
+        if (isLine(m.kind) && m.points?.length >= 2) {   // a ramp, bridge or fill: the nearest point of its line (each segment)
+          for (let k = 1; k < m.points.length; k++) {
+            const [x0, z0] = m.points[k - 1], [x1, z1] = m.points[k], L2 = (x1 - x0) ** 2 + (z1 - z0) ** 2 || 1;
+            const u = Math.min(1, Math.max(0, ((pk.x - x0) * (x1 - x0) + (pk.z - z0) * (z1 - z0)) / L2));
+            const d = Math.hypot(x0 + u * (x1 - x0) - pk.x, z0 + u * (z1 - z0) - pk.z);
+            if (d < bd) { bd = d; best = m; }
+          }
           continue;
         }
         if (!("x" in m)) continue;
@@ -1212,7 +1261,7 @@ export async function open(api) {
         if (!S.ramp) { S.ramp = { kind: S.tool, a: drag.ramp }; showHint(t3(LINE[S.tool].high)); }
         const pk = pick(e.clientX, e.clientY);
         S.hover = pk;
-        previewRamp(rampFar(S.ramp.a, pk));
+        previewRamp(farEnd(S.ramp.a, pk));
         return;
       }
       if (drag.rot) {
@@ -1235,7 +1284,7 @@ export async function open(api) {
   canvas.addEventListener("pointerup", (e) => {
     const d = drag;
     drag = null;
-    if (d && d.moved && d.ramp && S.ramp) { finishRamp(rampFar(S.ramp.a, pick(e.clientX, e.clientY))); return; }
+    if (d && d.moved && d.ramp && S.ramp) { finishRamp(farEnd(S.ramp.a, pick(e.clientX, e.clientY))); return; }
     if (d && d.moved) { update(); return; }
     click(pick(e.clientX, e.clientY), e);
   });
@@ -1288,7 +1337,8 @@ export async function open(api) {
       c: () => toggle("check"), h: () => toggle("tops"), i: () => toggle("walls"), m: () => setObjects(S.objects === "a" ? "c" : "a"),
       1: () => setTool(S.tool === "rope" ? null : "rope"), 2: () => setTool(S.tool === "portal" ? null : "portal"),
       3: () => setTool(S.tool === "landing" ? null : "landing"), 4: () => setTool(S.tool === "spawn" ? null : "spawn"),
-      5: () => setTool(S.tool === "ramp" ? null : "ramp"), 6: () => setTool(S.tool === "bridge" ? null : "bridge"), "?": () => toggleHelp() };
+      5: () => setTool(S.tool === "ramp" ? null : "ramp"), 6: () => setTool(S.tool === "bridge" ? null : "bridge"),
+      7: () => setTool(S.tool === "fill" ? null : "fill"), "?": () => toggleHelp() };
     const fn = keys[k.length === 1 ? k.toLowerCase() : k];
     if (fn) act(fn);
   };
@@ -1440,7 +1490,7 @@ export async function open(api) {
     await prefabsReady;
     // a ramp or bridge asked by the address (pictures): ramp= or bridge=x0,z0,f0,x1,z1,f1 shown as if being placed
     // (rampw= / bridgew= its width)
-    for (const kind of ["ramp", "bridge"]) {
+    for (const kind of ["ramp", "bridge", "fill"]) {
       const rq = (q.get(kind) || "").split(",").map(Number);
       if (rq.length !== 6 || !rq.every(Number.isFinite)) continue;
       setTool(kind);
@@ -1464,6 +1514,7 @@ export async function open(api) {
   window.__v3d = { ready, state: () => ({ ...S, moving: held.size, hover: null, asset: S.asset ? { kind: S.asset.kind, n: S.asset.cubes.length } : null, chunks: chunks.size, problems: problems.problems.map((p) => ({ ...p })),
     ramp: S.ramp ? { kind: S.ramp.kind || "ramp", a: S.ramp.a, b: S.ramp.b || null, ok: S.ramp.walk?.ok ?? null, reasons: S.ramp.walk?.reasons || [] } : null,
     ramps: rampDraw.filter(([m]) => m.kind === "ramp").map(([m, plan, walk]) => ({ id: m.id, rise: plan.rise, run: plan.run, width: plan.width, ok: walk?.ok ?? null, reasons: walk?.reasons || [] })),
+    fills: rampDraw.filter(([m]) => m.kind === "fill").map(([m, plan, walk]) => ({ id: m.id, block: plan.block, cells: plan.cells.length, points: m.points, ok: walk?.ok ?? null, reasons: walk?.reasons || [] })),
     bridges: rampDraw.filter(([m]) => m.kind === "bridge").map(([m, plan, walk]) => ({ id: m.id, rise: plan.rise, run: plan.run, width: plan.width, rows: plan.rows.length, segments: plan.segments, preset: plan.preset, span: plan.span, ok: walk?.ok ?? null, reasons: walk?.reasons || [] })) }), pick, screenOf };
 
   return {

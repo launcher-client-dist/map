@@ -149,7 +149,7 @@ test("map things round trip, with and without a destination", async () => {
   const s = await decode(await encode(things));
   assert.deepEqual(s.markers, things.markers);
   assert.ok(!("dest" in s.markers[2]));
-  assert.deepEqual(KINDS.slice(5).map((k) => k.name), ["rope", "lever", "hole", "door", "portal", "elevator", "rope2", "boss", "npc", "ramp", "bridge"]);
+  assert.deepEqual(KINDS.slice(5).map((k) => k.name), ["rope", "lever", "hole", "door", "portal", "elevator", "rope2", "boss", "npc", "ramp", "bridge", "fill"]);
   assert.deepEqual(KINDS.slice(0, 5).map((k) => k.name), ["spawn", "poi", "area", "route", "note"]);   // never reordered
   // an elevator leads to another floor like a rope
   const lift = { view: { floors: ["s"] }, markers: [{ id: 0, kind: "elevator", floor: "-2", locked: false, x: 4, z: 4, dest: { x: 4, z: 4, floor: "3" }, fields: { label: "elevador" } }] };
@@ -345,7 +345,7 @@ const later = {
 };
 
 test("a two-way rope, a boss and an NPC: kinds 11..13, round trip in both formats", async () => {
-  assert.deepEqual(KINDS.slice(CORE_KINDS).map((k) => k.name), ["rope2", "boss", "npc", "ramp", "bridge"]);
+  assert.deepEqual(KINDS.slice(CORE_KINDS).map((k) => k.name), ["rope2", "boss", "npc", "ramp", "bridge", "fill"]);
   assert.deepEqual((await decode(await encode(later))).markers, later.markers);
   const v1 = "1." + Buffer.from(deflateRawSync(payloadOf(later, 1))).toString("base64url");
   assert.deepEqual((await decode(v1)).markers, later.markers);
