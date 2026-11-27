@@ -990,6 +990,7 @@ let ghostShown = null;   // Revisar: the removed marker whose panel is open
 // dashed outline too. Drawing only (nothing goes into the link); undo brings the marker back and its X goes. The X
 // takes no click: a click there is the map's (a new rope on that same cell).
 let rmCache = null;
+let liveAtOpen = new Set();   // the ids the link held when opened: their removal is this visit's (Ctrl+Z brings it back)
 const removedNow = () => (rmCache ||= PK.removedSpots(opened.markers || [], markers, ML.where));
 const RM_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="#000" stroke-opacity=".7" stroke-width="5" stroke-linecap="round"/>'
   + '<path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="#ff4d4f" stroke-width="2.6" stroke-linecap="round"/></svg>';
@@ -1005,7 +1006,7 @@ function drawRemoved(p, s) {
     icon: L.divIcon({ className: "", iconSize: [size, size], iconAnchor: [size / 2, size / 2], html: `<div class="rmx${s.end ? " end" : ""}" data-rm="${s.id}">${RM_SVG}</div>` }) });
   const name = (KIND_UI[was.kind] ? t("kind." + was.kind) : was.kind) + (labelOf(was) ? ` "${labelOf(was)}"` : ` #${was.id}`);
   const words = el("span", {}, "✕ " + t(s.end ? "rm.end" : "rm.mark") + ": " + name);
-  words.append(el("br"), el("small", {}, t("rm.help")));
+  words.append(el("br"), el("small", {}, t(liveAtOpen.has(s.id) ? "rm.help" : "rm.saved")));
   mk.bindTooltip(words, { direction: "top", className: "lbl rm", offset: [0, -10] });
   mk.addTo(p.layer);
 }
@@ -1075,19 +1076,23 @@ function hookMenu(id, layer) {
   // a long press (touch, pen): not every browser makes it a contextmenu on a draggable marker
   const node = layer.getElement?.();
   if (!node) return;
-  let timer = 0, x0 = 0, y0 = 0;
+  let timer = 0, x0 = 0, y0 = 0, fired = false;
   const stop = () => clearTimeout(timer);
   node.addEventListener("pointerdown", (ev) => {
     if (ev.pointerType === "mouse" || mode !== "edit") return;
-    x0 = ev.clientX; y0 = ev.clientY; stop();
-    timer = setTimeout(() => { menuAt = Date.now(); markerMenu(id, x0, y0); }, LONG_PRESS_MS);
+    x0 = ev.clientX; y0 = ev.clientY; fired = false; stop();
+    timer = setTimeout(() => { fired = true; menuAt = Date.now(); markerMenu(id, x0, y0); }, LONG_PRESS_MS);
   });
   node.addEventListener("pointermove", (ev) => { if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > 8) stop(); });
-  for (const k of ["pointerup", "pointercancel"]) node.addEventListener(k, stop);
+  // the release of a press that opened the menu: the click it makes next is not a click on the marker
+  node.addEventListener("pointerup", () => { stop(); if (fired) { fired = false; menuAt = Date.now(); } });
+  node.addEventListener("pointercancel", stop);
   layer.on("dragstart", stop);
 }
+let menuFor = null;   // the marker the menu was opened on
 function markerMenu(id, x, y) {
   if (mode !== "edit" || !byId(id)) return;
+  menuFor = id;
   if (!multi.has(id)) { multi.clear(); if (selected !== id) { selected = id; refresh(); } }
   const group = multi.size > 1, m = byId(id);
   const editable = group ? groupIds().length > 0 : canEdit(m);
@@ -1104,8 +1109,14 @@ function markerMenu(id, x, y) {
   }
   menu.textContent = "";
   const close = () => { menu.hidden = true; };
+  // an entry acts on what the menu was opened for: that marker (or its group), whatever a stray click selected since
+  const group0 = group ? new Set(multi) : null;
+  const reassert = () => {
+    if (group0) { multi.clear(); for (const g of group0) if (byId(g)) multi.add(g); selected = null; }
+    else { multi.clear(); selected = id; }
+  };
   const item = (act, label, why, fn) => el("button", { type: "button", role: "menuitem", "data-act": act, class: why ? "off" : null,
-    "aria-disabled": why ? "true" : null, onclick: () => { if (why) { toast(t(why)); return; } close(); fn(); } },
+    "aria-disabled": why ? "true" : null, onclick: () => { if (why) { toast(t(why)); return; } close(); reassert(); fn(); } },
   el("div", {}, label, why ? el("span", {}, t(why)) : null));
   menu.append(el("div", { class: "mhead" }, group ? el("span", { class: "mk mini plain" }, "▣") : dotNode(m.kind in KIND_UI ? m.kind : "?", "mk mini"),
     el("b", {}, group ? t("menuOf", multi.size) : (KIND_UI[m.kind] ? t("kind." + m.kind) : m.kind) + " #" + m.id)));
@@ -1120,6 +1131,7 @@ function markerMenu(id, x, y) {
     const f = fs.value;
     if (!f) return;
     close();
+    reassert();
     if (group) { groupToFloor(f); return; }
     commit(() => { const n = byId(id); if (!n || n.floor === f) return false; n.floor = f; });
     if (!panes.some((q) => q.floor === f)) showFloor(f);
@@ -1150,6 +1162,9 @@ function reviewDiff() { return (rvCache ||= RV.diffOf(baseMarkers, markers)); }
 function refresh() {
   rvCache = null;
   rmCache = null;
+  // the marker menu stays only while its marker is still the selection (a Delete key, an undo, Esc: it goes)
+  const mm = $("markMenu");
+  if (mm && !mm.hidden && !(byId(menuFor) && (selected === menuFor || multi.has(menuFor)))) mm.hidden = true;
   // picking a spot for a marker that is gone or locked now (undo, delete): stop picking
   if (["dest", "walls", "pulldest"].includes(tool) && !canEdit(byId(destFor))) { tool = "select"; destFor = null; paintTools(); }
   if (tool === "movegroup" && multi.size < 2) { tool = "select"; paintTools(); }
@@ -2014,7 +2029,7 @@ function showDest(d) {
 
 // why Delete can't delete now (an i18n key; null: it can): the key, the panel's buttons and the marker menu ask this
 function whyNotDelete() {
-  return PK.whyNotDelete({ mode, tool, selected: byId(selected) || null, group: multi.size ? [...multi].map(byId).filter(Boolean) : null,
+  return PK.whyNotDelete({ mode, tool: viewMode === "3d" ? "select" : tool, selected: byId(selected) || null, group: multi.size ? [...multi].map(byId).filter(Boolean) : null,
     staff: STAFF, editable: canEdit });
 }
 // a Delete that can't: a short toast says why (never a silent no-op)
@@ -3082,6 +3097,7 @@ async function start() {
     linkState = state;
     baseMarkers = ML.baselineOf(state).markers;
     markers = clone(state.markers);
+    liveAtOpen = new Set(state.markers.map((m) => m.id));
     nextId = state.next;
     view = state.view;
     const known = (f) => tileMeta.floors.includes(f);
