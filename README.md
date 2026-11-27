@@ -38,6 +38,12 @@ and posts the new link (with its list of changes) back in their ticket.
   out). The panel then offers **Move** (then a tap: the group's middle goes there, on that pane's floor), **Duplicate**
   (also Ctrl+D, for one marker too: copies a little apart, selected), **To floor** and **Delete**; dragging one of them
   moves them all. Each is one undo step.
+- **Selecting and deleting:** several markers on one spot: each click again on it takes the next one (the panel says
+  "1 of 3" and has **Next**); with the mouse, the one a click would take gets a dashed ring and its name. Right-click
+  (a long press on a touch screen) on a marker: **Delete**, **Duplicate**, **To floor**. A Delete that can't (a locked
+  context marker, nothing selected, a drawing tool on, Review, typing in a field) says why in a short note, and so does
+  a click on a marker that a drawing tool ignores. A marker of the opened link that was deleted leaves a red ✕ where it
+  was (and where it led, for a rope, hole, portal or elevator) until undo brings it back: drawing only, never in the link.
 - **Review** (for everyone): look only (nothing moves or changes). The panel sums up what the map proposes (monsters,
   spawns, species, floors, the locked context apart; monsters by species with a bar per floor; objects) and what to
   check before sending (ropes, holes and portals without a destination, notes next to a spawn, levers with no action
