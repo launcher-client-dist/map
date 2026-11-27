@@ -1,4 +1,4 @@
-// The B look's chunk meshes (map3d/b/<a>_<b>.glb): glTF 2.0 binary, as map3d_export.py writes them, read without a
+// The B look's chunk meshes (the assets site's simplified/<sha16>.glb.gz): glTF 2.0 binary, as map3d_export.py writes them, read without a
 // glTF loader (only what that writer uses). No DOM here: the page and the tests (node) share it.
 // One node (translation + scale: KHR_mesh_quantization, positions as SHORT padded to 4 a vertex), one mesh, each
 // primitive POSITION (SHORT VEC3, stride 8), COLOR_0 (normalized UNSIGNED_BYTE VEC4), indices (u16 or u32), its

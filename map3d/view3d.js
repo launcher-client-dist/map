@@ -53,9 +53,17 @@ export async function open(api) {
   let meta;
   try { meta = await (await fetch(new URL("meta.json", BASE))).json(); }
   catch { root.append(h("div", { class: "v3d-msg" }, t3("noData"))); return { refresh() {}, show() {}, hide() { root.hidden = true; }, goTo() {} }; }
-  // the Simplified ground (the game's own ground meshes, map3d/b): local data only for now, never in the public files
-  // the Simplified ground (the game's ground meshes, flat colours, map3d/b): the chunks that have one, listed by the data
-  const bSet = new Set((Array.isArray(meta.b) ? meta.b : []).map(([a, b]) => a + "_" + b));
+  // the Simplified ground (the game's ground meshes, flat colours): the assets site's "simplified" look
+  // (assets.opengea.tech: latest.json names the version's manifest; each chunk's file is named by its content, so the
+  // browser keeps it until a new version changes that chunk); ?assets= another site. None there: the blocks.
+  const ASSETS = new URL(q.get("assets") || "https://assets.opengea.tech/");
+  let simplified = null;
+  try {
+    const latest = await (await fetch(new URL("latest.json", ASSETS), { cache: "no-cache" })).json();
+    simplified = await (await fetch(new URL(latest.simplified, ASSETS))).json();
+  } catch { simplified = null; }
+  const bUrl = (key) => { const [v, hash] = simplified.chunks[key].split("/"); return new URL(`${v}/simplified/${hash}.glb.gz`, ASSETS); };
+  const bSet = new Set(simplified ? Object.keys(simplified.chunks) : []);
   const hasB = bSet.size > 0;
   const chunkSet = new Set(meta.chunks.map(([a, b]) => a + "_" + b));
 
@@ -145,7 +153,7 @@ export async function open(api) {
       paintStatus();
       ch.ready = Promise.all([
         fetch(new URL(`c/${key}.bin${meta.gz ? ".gz" : ""}`, BASE)).then((r) => (r.ok ? r.arrayBuffer() : null)).then(unpack),
-        bSet.has(key) ? fetch(new URL(`b/${key}.glb.gz`, BASE)).then((r) => (r.ok ? r.arrayBuffer() : null)).then(unpack) : null,
+        bSet.has(key) ? fetch(bUrl(key)).then((r) => (r.ok ? r.arrayBuffer() : null)).then(unpack) : null,
       ]).then(([cb, gb]) => {
         if (!chunks.has(key)) return;
         if (cb) { ch.c = CD.decodeChunk(cb); ch.cMesh = buildC(ch.c); ch.wMesh = buildWalls(ch.c); ch.tMesh = buildTops(ch.c); layersC.add(ch.cMesh); wallsG.add(ch.wMesh); topsG.add(ch.tMesh); }
