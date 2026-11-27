@@ -547,6 +547,7 @@ body:not(.v3d) #view3d { display: none; }
 .v3d-tip .a { color: #8fb6ff; margin-top: 4px; }
 .v3d-status { position: absolute; top: 62px; right: 12px; z-index: 3; color: var(--muted); font-size: 12px; background: #171b22d0; border-radius: 8px; padding: 3px 8px; }
 .v3d-status[hidden] { display: none; }
+.v3d-status-f { top: 92px; }
 .v3d-pins { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
 .v3d-pin { position: absolute; transform: translate(-50%, -100%); width: 26px; height: 26px; border-radius: 50%; background: #ffe066; color: #000;
            font-weight: 800; font-size: 14px; display: grid; place-items: center; border: 2px solid #000; box-shadow: 0 2px 6px #000a; }

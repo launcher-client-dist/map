@@ -25,6 +25,13 @@ const WARN_ORDER = ["edge", "slope", "hidden", "nogrid"];
 export const chunkOf = (x, z) => [Math.floor((x + 8) / CHUNK), Math.floor((z + 8) / CHUNK)];
 export const chunkKey = (a, b) => a + "_" + b;
 export const cellKey = (x, z) => x + "," + z;
+// a chunk's distance to a focus (x, z), in cells: its centre's
+export const chunkDistance = (a, b, x, z) => Math.hypot(a * CHUNK - x, b * CHUNK - z);
+// chunks as [a, b] pairs (or {a, b} objects), the nearest to the focus first (a stable sort: equal distances keep their order)
+export const nearestFirst = (list, x, z) => [...list].sort((p, q) => {
+  const [pa, pb] = Array.isArray(p) ? p : [p.a, p.b], [qa, qb] = Array.isArray(q) ? q : [q.a, q.b];
+  return chunkDistance(pa, pb, x, z) - chunkDistance(qa, qb, x, z);
+});
 
 // a chunk file -> {a, b, cells: Map("x,z" -> {x, z, cubes: [{y, kind, flags}], layers: [layer]})}
 export function decodeChunk(buf) {

@@ -143,9 +143,18 @@ export async function open(api) {
     const r = Math.min(4, Math.ceil(1.2 * S.zoom + (S.free ? 1 : 0.6)));
     return meta.chunks.filter(([a, b]) => Math.abs(a - a0) <= r && Math.abs(b - b0) <= r);
   }
+  function wantNearest() {
+    return CD.nearestFirst(wantChunks(), S.x, S.z);   // (the nearest first: the downloads start in this order)
+  }
+  // a chunk's distance to the camera's focus, in cells (its centre; the chunk (a, b) holds x in [16a - 8, 16a + 8))
+  const chunkDist = (a, b) => CD.chunkDistance(a, b, S.x, S.z);
   let loadingN = 0;
+  // the floors' and markers' repaint after chunks arrive: once a tick however many chunks came (each used to repaint every
+  // marker, 96 markers a chunk, between the downloads)
+  let repaintT = 0;
+  function repaintSoon() { if (!repaintT) repaintT = setTimeout(() => { repaintT = 0; paintFloors(); paintMarkers(); draw(); }, 60); }
   function stream() {
-    const want = wantChunks(), keys = new Set(want.map(([a, b]) => CD.chunkKey(a, b)));
+    const want = wantNearest(), keys = new Set(want.map(([a, b]) => CD.chunkKey(a, b)));
     for (const [a, b] of want) {
       const key = CD.chunkKey(a, b);
       if (chunks.has(key)) continue;
@@ -153,6 +162,7 @@ export async function open(api) {
       chunks.set(key, ch);
       loadingN++;
       paintStatus();
+      queueF(ch);   // (the Complete look's own queue: it never waits for this chunk's blocks or for the markers' repaints)
       ch.ready = Promise.all([
         fetch(new URL(`c/${key}.bin${meta.gz ? ".gz" : ""}`, BASE)).then((r) => (r.ok ? r.arrayBuffer() : null)).then(unpack),
         bSet.has(key) ? storeB.chunk(key).then(unpack) : null,
@@ -160,10 +170,10 @@ export async function open(api) {
         if (!chunks.has(key)) return;
         if (cb) { ch.c = CD.decodeChunk(cb); ch.cMesh = buildC(ch.c); ch.wMesh = buildWalls(ch.c); ch.tMesh = buildTops(ch.c); layersC.add(ch.cMesh); wallsG.add(ch.wMesh); topsG.add(ch.tMesh); }
         if (gb) { ch.bMesh = buildB(parseGlb(gb)); layersB.add(ch.bMesh); }
-        loadF(ch);
         syncGround(ch);
-      }).catch((e) => console.warn("map3d", key, e)).finally(() => { surfaceMemo.clear(); loadingN--; paintStatus(); paintFloors(); paintMarkers(); draw(); });
+      }).catch((e) => console.warn("map3d", key, e)).finally(() => { surfaceMemo.clear(); loadingN--; paintStatus(); repaintSoon(); draw(); });
     }
+    pumpF();   // (the camera may have moved: the queue picks its nearest next)
     // far chunks go (memory)
     const [a0, b0] = CD.chunkOf(Math.round(S.x), Math.round(S.z));
     for (const [key, ch] of chunks) {
@@ -216,14 +226,40 @@ export async function open(api) {
     if (m.name === "crown") { out.visible = !S.check; crownsF.push(out); }
     return out;
   }
-  function loadF(ch) {
+  // the Complete look's downloads: at most F_MAX in flight, the nearest to the camera's focus next (picked again at every
+  // start, so a camera that moved re-prioritises the queue), each stage yielding to the page
+  const F_MAX = Math.min(16, Math.max(1, +q.get("fmax") || 6)), fQueue = new Set();
+  let fActive = 0;
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  function loadF(ch) { queueF(ch); }   // (the look was switched on: queue the chunk if it has a Complete file and none is loaded)
+  function queueF(ch) {
+    if (S.look !== "f" || ch.fMesh || ch.fLoading || fQueue.has(ch) || !fSet.has(CD.chunkKey(ch.a, ch.b))) return;
+    fQueue.add(ch);
+    pumpF();
+  }
+  function pumpF() {
+    while (fActive < F_MAX && fQueue.size) {
+      let best = null, bd = Infinity;
+      for (const ch of fQueue) {
+        if (!chunks.has(CD.chunkKey(ch.a, ch.b)) || S.look !== "f") { fQueue.delete(ch); continue; }
+        const d = chunkDist(ch.a, ch.b);
+        if (d < bd) { bd = d; best = ch; }
+      }
+      if (!best) break;
+      fQueue.delete(best);
+      startF(best);
+    }
+    paintFullStatus();
+  }
+  function startF(ch) {
     const key = CD.chunkKey(ch.a, ch.b);
-    if (S.look !== "f" || ch.fMesh || ch.fLoading || !fSet.has(key)) return;
     ch.fLoading = true;
+    fActive++;
     const url = storeF.chunkUrl(key);
     storeF.chunk(key).then(unpack).then(async (buf) => {
       if (!buf || !chunks.has(key)) return;
       await storeF.textures(glbJson(buf));
+      await tick();
       const l = await fullLoader();
       const g = await new Promise((ok, bad) => l.parse(buf, new URL("./", url).href, ok, bad));
       g.scene.traverse((n) => { if (n.isMesh) n.material = fullMaterial(n.material, !!n.geometry.attributes.color); });
@@ -232,7 +268,23 @@ export async function open(api) {
       layersF.add(ch.fMesh);
       syncGround(ch);
       draw();
-    }).catch((e) => console.warn("map3d full", key, e)).finally(() => { ch.fLoading = false; });
+    }).catch((e) => console.warn("map3d full", key, e)).finally(() => { ch.fLoading = false; fActive--; pumpF(); });
+  }
+  // the chunks the view still shows as Simplified: the ones within 1 of the focus (what is in front of the camera) that
+  // have a Complete file, loaded or not
+  function fRemaining() {
+    if (S.look !== "f") return 0;
+    const [a0, b0] = CD.chunkOf(Math.round(S.x), Math.round(S.z));
+    let n = 0;
+    for (const ch of chunks.values()) if (!ch.fMesh && Math.abs(ch.a - a0) <= 1 && Math.abs(ch.b - b0) <= 1 && fSet.has(CD.chunkKey(ch.a, ch.b))) n++;
+    return n;
+  }
+  function paintFullStatus() {
+    if (!fullStatus) return;   // (the card is made after the first chunks are asked for)
+    const n = fRemaining();
+    fullStatus.hidden = n === 0;
+    if (n) fullStatus.textContent = t3("loadingF", n);
+    root.dataset.fullLeft = String(n);
   }
 
   function buildB(g) {
@@ -906,10 +958,11 @@ export async function open(api) {
   const placeBox = h("div", { class: "v3d-card v3d-place" });
   const tipBox = h("div", { class: "v3d-tip", hidden: true });
   const status = h("div", { class: "v3d-status", hidden: true });
+  var fullStatus = h("div", { class: "v3d-status v3d-status-f", hidden: true });   // (the full look still loading in front of the camera)
   const pinLayer = h("div", { class: "v3d-pins" });
   const helpBox = h("div", { class: "v3d-help", hidden: true, role: "dialog", "aria-label": t3("helpTitle") });
   const topRow = h("div", { class: "v3d-top" }, lookBox, camBox);
-  root.append(pinLayer, topRow, hint, floorBox, probBox, miniBox, placeBox, tipBox, status, helpBox);
+  root.append(pinLayer, topRow, hint, floorBox, probBox, miniBox, placeBox, tipBox, status, fullStatus, helpBox);
   // (a narrow view wraps the top cards onto two rows: the floor card and the hint go under them)
   function placeCards() {
     const below = topRow.offsetTop + topRow.offsetHeight + 8;
