@@ -9,6 +9,7 @@ import * as CD from "../map3d/cdata.js";
 import { parseGlb, vertexOf } from "../map3d/glb.js";
 import { WORDS3, translator3 } from "../map3d/words3d.js";
 import { LANGS } from "../i18n.js";
+import { sliderValue, thumbAt } from "../map3d/slider.js";
 import { encode, decode, floorCode } from "../maplink.js";
 
 // a chunk file as the exporter writes it: cells {"x,z": {cubes: [[y, kind, flags]], layers: [[f, stand, floor, bad, warn, exits]]}}
@@ -145,6 +146,28 @@ test("markers placed in 3D make the same link: the floor each layer has, a landi
   // and the check reads the link's markers back where they were placed
   const { problems } = CD.problemsOf(back.markers, cellAt);
   assert.deepEqual(problems.map((p) => [p.id, p.end, p.reasons[0].code]), [[0, "dest", "dark"], [1, "at", "dark"], [2, "at", "water"]]);
+});
+
+test("a slider's value from the pointer: the thumb's ends, steps, a reversed (vertical) one, outside the track", () => {
+  // the cut: horizontal, 200 px wide at x 100, a 16 px thumb, -16 .. 16 by 0.5
+  const cut = { start: 100, size: 200, thumb: 16, min: -16, max: 16, step: 0.5 };
+  assert.equal(sliderValue({ ...cut, pos: 108 }), -16);      // the thumb's centre at the left end
+  assert.equal(sliderValue({ ...cut, pos: 292 }), 16);       // ... at the right end
+  assert.equal(sliderValue({ ...cut, pos: 200 }), 0);        // the middle
+  assert.equal(sliderValue({ ...cut, pos: 20 }), -16);       // left of the track: its min
+  assert.equal(sliderValue({ ...cut, pos: 900 }), 16);       // right of it: its max
+  assert.equal(sliderValue({ ...cut, pos: 202.9 }) % 0.5, 0); // snapped to the step
+  // a press on the thumb keeps its value (a drag starts where it is)
+  for (const v of [-16, -7.5, 0, 3, 16]) assert.equal(sliderValue({ ...cut, pos: thumbAt({ ...cut, value: v }) }), v);
+  // moving 60 px left from 0 lowers the cut by 60 / 184 of 32 = 10.4 -> 10.5
+  assert.equal(sliderValue({ ...cut, pos: thumbAt({ ...cut, value: 0 }) - 60 }), -10.5);
+  // the floors: vertical, 120 px tall at y 50, top = max (all floors), 0 .. 6 by 1
+  const fl = { start: 50, size: 120, thumb: 16, min: 0, max: 6, step: 1, reverse: true };
+  assert.equal(sliderValue({ ...fl, pos: 58 }), 6);
+  assert.equal(sliderValue({ ...fl, pos: 162 }), 0);
+  for (let v = 0; v <= 6; v++) assert.equal(sliderValue({ ...fl, pos: thumbAt({ ...fl, value: v }) }), v);
+  assert.equal(sliderValue({ ...fl, pos: thumbAt({ ...fl, value: 6 }) + 60 }), 3);   // 60 px down from the top: 60 / 104 of 6 = 3.46 steps -> 3
+  assert.equal(sliderValue({ start: 0, size: 100, min: 3, max: 3 }), 3);            // one stop only
 });
 
 // ---- with the published data (map3d/, written by the staff tools' exporter): skipped without it

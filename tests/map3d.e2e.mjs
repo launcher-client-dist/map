@@ -205,7 +205,49 @@ try {
   const s4 = await js("window.__v3d.state()");
   assert.ok(Math.abs(s4.x - s3.x) < 1e-9 && Math.abs(s4.z - s3.z) < 1e-9, "no move while typing");
   await js(`document.getElementById("gotoBox").blur()`);
-  console.log("ok: rope post + landing placed by clicks, a spawn in the canal flagged red, the link round trip holds them; copy/paste, whole roof / one block, the keys; W A S D move along the view's heading");
+
+  // the sliders are held while dragged: pressed on the thumb, moved 60 px, released (the mouse never leaves the left
+  // button between): the value follows; the view under them does not pan
+  const thumb = (sel, vertical) => js(`(() => { const el = document.querySelector("${sel}"), r = el.getBoundingClientRect();
+    const min = +el.min, max = +el.max, v = +el.value; let f = max > min ? (v - min) / (max - min) : 0;
+    if (${vertical}) f = 1 - f;
+    return ${vertical} ? { x: r.left + r.width / 2, y: r.top + 8 + f * (r.height - 16) } : { x: r.left + 8 + f * (r.width - 16), y: r.top + r.height / 2 }; })()`);
+  const drag = async (from, dx, dy) => {
+    await cdp("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y });
+    await cdp("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, button: "left", buttons: 1, clickCount: 1 });
+    for (let k = 1; k <= 6; k++) {   // (in steps, as a hand moves: the value follows while held)
+      await cdp("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x + (dx * k) / 6, y: from.y + (dy * k) / 6, button: "left", buttons: 1 });
+      await sleep(40);
+    }
+    await cdp("Input.dispatchMouseEvent", { type: "mouseReleased", x: from.x + dx, y: from.y + dy, button: "left", buttons: 0, clickCount: 1 });
+    await sleep(250);
+  };
+  const c0 = await js("window.__v3d.state()");
+  const cutFrom = await thumb(".v3d-hslider", false);
+  await drag(cutFrom, -60, 0);
+  const c1 = await js("window.__v3d.state()");
+  const cutTop = await js(`+document.querySelector(".v3d-hslider").max`);
+  const before = c0.cut == null ? cutTop : c0.cut;
+  assert.ok(c1.cut != null && before - c1.cut >= 5, `the cut followed the drag 60 px left: ${before} -> ${c1.cut}`);
+  assert.ok(Math.abs(c1.x - c0.x) < 1e-9 && Math.abs(c1.z - c0.z) < 1e-9 && c1.yaw === c0.yaw, "the view did not pan while the cut slider was held");
+  assert.equal(await js(`document.querySelector(".v3d-hslider").classList.contains("held")`), false, "released");
+  // a click on the cut track's right end jumps there: no cut
+  const trackEnd = await js(`(() => { const r = document.querySelector(".v3d-hslider").getBoundingClientRect(); return { x: r.right - 3, y: r.top + r.height / 2 }; })()`);
+  await drag(trackEnd, 0, 0);
+  assert.equal((await js("window.__v3d.state()")).cut, null, "a click on the track's end: no cut");
+  // the floor slider: from the top (all floors) 60 px down: a floor below, the view where it was
+  await key("0", "Digit0", 48);
+  const f0 = await js("window.__v3d.state()");
+  await drag(await thumb(".v3d-vslider", true), 0, 60);
+  const f1 = await js("window.__v3d.state()");
+  assert.ok(f0.floor === "all" && f1.floor !== "all", `the floor followed the drag 60 px down: ${f0.floor} -> ${f1.floor}`);
+  assert.equal(await js(`document.querySelector(".v3d-stops .on")?.dataset.floor`), f1.floor, "the floor list follows");
+  assert.ok(Math.abs(f1.x - f0.x) < 1e-9 && Math.abs(f1.z - f0.z) < 1e-9, "the view did not pan while the floor slider was held");
+  // and its keys still work (focused, the arrow moves one stop)
+  await key("ArrowUp", "ArrowUp", 38);
+  assert.notEqual((await js("window.__v3d.state()")).floor, f1.floor, "the focused slider's arrow key steps a floor");
+  await shot("sliders_dragged.png");
+  console.log("ok: rope post + landing placed by clicks, a spawn in the canal flagged red, the link round trip holds them; copy/paste, whole roof / one block, the keys; W A S D move along the view's heading; the floor and cut sliders held while dragged");
 } catch (e) {
   failed = true;
   console.error("FAIL", e);

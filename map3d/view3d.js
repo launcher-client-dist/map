@@ -8,6 +8,7 @@ import * as THREE from "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.170.0/
 import { parseGlb } from "./glb.js";
 import * as CD from "./cdata.js";
 import { translator3 } from "./words3d.js";
+import { sliderValue } from "./slider.js";
 import { createObjects, unpack } from "./objects3d.js";
 import { moveKey, moveStep } from "./move.js";
 
@@ -607,23 +608,77 @@ export async function open(api) {
   // Floor: a slider from the top ("all", nothing cut) down to the deepest floor here, its stops listed beside it
   // (a click on one goes there). Cut ("profundidade"): the height the blocks are sliced at inside the floor, like a
   // section, to look into the walls and rooms at that level; its top end is "no cut".
+  // The floor slider, its stops and the cut slider are made once: a slider rebuilt while it is held loses the drag
+  // (the bug: each change repainted the card, so the slider let go after the first step). paintFloors only updates them.
+  const floorSlider = h("input", { type: "range", class: "v3d-vslider", min: 0, max: 0, step: 1, value: "0",
+    "aria-label": t3("floorWord"), title: t3("floorCutHelp") + " ([ ] PageUp PageDown)" });
+  const floorStops = h("div", { class: "v3d-stops" });
+  const cutSlider = h("input", { type: "range", class: "v3d-hslider", min: "-16", max: "16", step: "0.5", value: "16",
+    "aria-label": t3("cutWord"), title: t3("cutHelp") + " (, .)" });
+  const cutLabel = h("div", { class: "v3d-sub" });
+  floorBox.append(h("div", { class: "v3d-k", title: t3("floorCutHelp") }, t3("floorWord")),
+    h("div", { class: "v3d-floorpick" }, floorSlider, floorStops),
+    h("div", { class: "v3d-k", title: t3("cutHelp") }, t3("cutWord")), cutSlider, cutLabel);
+  let floorOpts = ["all"];
+  // a slider held by the pointer: pressed (on the thumb or the track: it jumps there) it captures the pointer, a move
+  // while held sets the value live, a release or a cancel lets go; mouse, pen and touch alike. Nothing reaches the
+  // view under it (no pan starts). The keyboard keeps the slider's own keys (its input event).
+  function holdSlider(el, vertical, onValue) {
+    let held = null;
+    el.style.touchAction = "none";
+    const valueAt = (e) => {
+      const r = el.getBoundingClientRect(), min = +el.min, max = +el.max, step = +el.step || 1;
+      return vertical ? sliderValue({ pos: e.clientY, start: r.top, size: r.height, min, max, step, reverse: true })
+        : sliderValue({ pos: e.clientX, start: r.left, size: r.width, min, max, step });
+    };
+    const set = (e) => { const v = valueAt(e); if (+el.value !== v || !el.dataset.set) { el.value = String(v); el.dataset.set = "1"; onValue(v); } };
+    el.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      el.focus({ preventScroll: true });
+      held = e.pointerId;
+      el.setPointerCapture(e.pointerId);
+      el.classList.add("held");
+      delete el.dataset.set;
+      set(e);
+    });
+    el.addEventListener("pointermove", (e) => {
+      if (held !== e.pointerId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      set(e);
+    });
+    const end = (e) => {
+      if (held !== e.pointerId) return;
+      e.stopPropagation();
+      held = null;
+      if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
+      el.classList.remove("held");
+    };
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+    el.addEventListener("lostpointercapture", end);
+    el.addEventListener("input", () => { if (held == null) onValue(+el.value); });   // (the keyboard)
+    el.addEventListener("keydown", (e) => e.stopPropagation(), true);   // (its arrows are the slider's, not the view's)
+  }
+  holdSlider(floorSlider, true, (v) => { const f = floorOpts[floorOpts.length - 1 - v]; if (f != null && f !== S.floor) setFloor(f); });
+  holdSlider(cutSlider, false, (v) => setCut(v));
+
   function paintFloors() {
-    const opts = floorOptions(), n = opts.length;
+    floorOpts = floorOptions();
+    const opts = floorOpts, n = opts.length;
     const i = Math.max(0, opts.indexOf(S.floor));
     const here = (() => { const c = cellAt(Math.round(S.x), Math.round(S.z)); return c && c.layers.length ? CD.layerFor(c, "s").floor : null; })();
-    const fs = h("input", { type: "range", class: "v3d-vslider", min: 0, max: n - 1, step: 1, value: String(n - 1 - i),
-      "aria-label": t3("floorWord"), title: t3("floorCutHelp") + " ([ ] PageUp PageDown)" });
-    fs.addEventListener("input", () => setFloor(opts[n - 1 - +fs.value]));
-    const stops = h("div", { class: "v3d-stops" }, opts.map((f) => h("button", { type: "button", "data-floor": f, class: f === S.floor ? "on" : "", onclick: () => setFloor(f) },
+    floorSlider.max = String(n - 1);
+    floorSlider.value = String(n - 1 - i);
+    floorStops.replaceChildren(...opts.map((f) => h("button", { type: "button", "data-floor": f, class: f === S.floor ? "on" : "", onclick: () => setFloor(f) },
       f === "all" ? t3("floorAll") : floorWord(f), f === here ? h("span", { class: "dot", title: t3("floorHere") }, "●") : null)));
     const [lo, hi] = cutRange, cut = Math.min(cutY(), hi);
-    const cs = h("input", { type: "range", class: "v3d-hslider", min: String(lo), max: String(hi), step: "0.5", value: String(cut),
-      "aria-label": t3("cutWord"), title: t3("cutHelp") + " (, .)" });
-    cs.addEventListener("input", () => setCut(+cs.value));
-    floorBox.replaceChildren(h("div", { class: "v3d-k", title: t3("floorCutHelp") }, t3("floorWord")),
-      h("div", { class: "v3d-floorpick" }, fs, stops),
-      h("div", { class: "v3d-k", title: t3("cutHelp") }, t3("cutWord")), cs,
-      h("div", { class: "v3d-sub" }, cut >= hi ? t3("cutNone") : t3("cutAt", fmt(cut))));
+    cutSlider.min = String(lo);
+    cutSlider.max = String(hi);
+    if (!cutSlider.classList.contains("held")) cutSlider.value = String(cut);
+    cutLabel.textContent = cut >= hi ? t3("cutNone") : t3("cutAt", fmt(cut));
   }
   function setFloor(f) { S.floor = f; S.cut = null; cutPlane.constant = cutY(); paintFloors(); update(); }
   function stepFloor(dir) {   // -1 up, +1 down
