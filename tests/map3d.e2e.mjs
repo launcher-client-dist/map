@@ -178,7 +178,34 @@ try {
   assert.notEqual((await js("window.__v3d.state()")).floor, "all", "[ steps down a floor");
   await key(",", "Comma", 188);
   assert.ok((await js("window.__v3d.state()")).cut != null, ", lowers the cut");
-  console.log("ok: rope post + landing placed by clicks, a spawn in the canal flagged red, the link round trip holds them; copy/paste, whole roof / one block, the keys");
+  // W held: the view's centre glides up the screen (north at the start); after E (a 90° turn) W goes east
+  const hold = async (k, code, vk, ms) => {
+    await cdp("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk, ...(k.length === 1 ? { text: k } : {}) });
+    await sleep(ms);
+    await cdp("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk });
+    await sleep(200);
+  };
+  await key("0", "Digit0", 48);   // (all floors: no cut moving with the floor)
+  const s0 = await js("window.__v3d.state()");
+  assert.equal(s0.yaw, 0);
+  await hold("w", "KeyW", 87, 500);
+  const s1 = await js("window.__v3d.state()");
+  assert.ok(s1.z - s0.z > 1 && Math.abs(s1.x - s0.x) < 0.01, `W moved north: ${JSON.stringify([s0.x, s0.z, s1.x, s1.z])}`);
+  assert.equal(s1.moving, 0, "released: no more moving");
+  await key("e", "KeyE", 69);
+  await hold("w", "KeyW", 87, 500);
+  const s2 = await js("window.__v3d.state()");
+  assert.ok(s2.x - s1.x > 1 && Math.abs(s2.z - s1.z) < 0.01, `after E, W moved east: ${JSON.stringify([s1.x, s1.z, s2.x, s2.z])}`);
+  await hold("ArrowDown", "ArrowDown", 40, 300);
+  const s3 = await js("window.__v3d.state()");
+  assert.ok(s2.x - s3.x > 0.5, `ArrowDown moved back west: ${JSON.stringify([s2.x, s3.x])}`);
+  // typing in a field: the keys stay in the field
+  await js(`document.getElementById("gotoBox").focus()`);
+  await hold("w", "KeyW", 87, 300);
+  const s4 = await js("window.__v3d.state()");
+  assert.ok(Math.abs(s4.x - s3.x) < 1e-9 && Math.abs(s4.z - s3.z) < 1e-9, "no move while typing");
+  await js(`document.getElementById("gotoBox").blur()`);
+  console.log("ok: rope post + landing placed by clicks, a spawn in the canal flagged red, the link round trip holds them; copy/paste, whole roof / one block, the keys; W A S D move along the view's heading");
 } catch (e) {
   failed = true;
   console.error("FAIL", e);

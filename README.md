@@ -106,7 +106,8 @@ is the one the 2D page makes.
   monster's icon and how many) or **Models** (the game's own models of the rope post, hole, portal, lever, every
   monster a spawn or a boss can name, a figure for an NPC, with a ring and a label; markers again when zoomed out).
   Areas are drawn as their cells, routes as a line.
-- **Camera:** ⟲ ⟳ 90° (Q, E), + / −, the wheel; drag to move; right-drag (or Shift-drag) turns and tilts (F: free
+- **Camera:** W A S D or the arrows move (held: it glides; W is always up the screen, whatever Q / E turned; Shift
+  moves faster); ⟲ ⟳ 90° (Q, E), + / −, the wheel; drag to move; right-drag (or Shift-drag) turns and tilts (F: free
   view); **See as the player** (P) goes back.
 - **Floor:** a slider (PageUp / PageDown, `]` / `[`, 0 for all floors), its stops beside it: everything above the
   floor is cut away, as the game hides what is over its character. **Cut** (`,` / `.`): the height the blocks are

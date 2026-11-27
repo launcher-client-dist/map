@@ -9,6 +9,7 @@ import { parseGlb } from "./glb.js";
 import * as CD from "./cdata.js";
 import { translator3 } from "./words3d.js";
 import { createObjects, unpack } from "./objects3d.js";
+import { moveKey, moveStep } from "./move.js";
 
 const BASE = new URL("./", import.meta.url);
 // the game's camera (the staff tools' gamecam.py, measured on the real client): FOV 25° vertical, pitched 57° down, the
@@ -641,7 +642,7 @@ export async function open(api) {
 
   // the keyboard: one key each (nothing while typing in a field); "?" lists them
   const KEYS = [["PageUp  ]", "kFloorUp"], ["PageDown  [", "kFloorDown"], ["0", "kFloorAll"], [",  .", "kCut"],
-    ["Q  E", "kRotate"], ["+  −", "kZoom"], ["P", "kPlayer"], ["F", "kFree"], ["C", "kCheck"], ["H", "kTops"], ["I", "kWalls"],
+    ["W  A  S  D", "kMove"], ["Q  E", "kRotate"], ["+  −", "kZoom"], ["P", "kPlayer"], ["F", "kFree"], ["C", "kCheck"], ["H", "kTops"], ["I", "kWalls"],
     ["M", "kObjects"], ["1  2  3  4", "kPlace"], ["Ctrl+C  Ctrl+V", "kCopy"], ["kAltClick", "kBlock"], ["Esc", "kEsc"], ["?", "kHelp"]];
   function toggleHelp(on = !S.help) {
     S.help = on;
@@ -853,9 +854,36 @@ export async function open(api) {
   });
   canvas.addEventListener("pointerleave", () => { if (!drag) showHover(null); });
   canvas.addEventListener("wheel", (e) => { e.preventDefault(); zoomBy(e.deltaY > 0 ? 1.12 : 1 / 1.12); }, { passive: false });
+  // W A S D and the arrows: held, the view glides that way (relative to its heading: W is always up the screen), per
+  // frame and by zoom; Shift moves faster. Nothing while typing in a field.
+  const held = new Set();
+  let moveRaf = 0, moveT = 0, fast = false;
+  function moveFrame(t) {
+    moveRaf = 0;
+    if (!held.size || root.hidden) { held.clear(); update(); return; }
+    const dt = moveT ? (t - moveT) / 1000 : 1 / 60;
+    moveT = t;
+    const [dx, dz] = moveStep(S.yaw, held, dt, S.zoom, fast);
+    S.x += dx; S.z += dz;
+    update(false);
+    moveRaf = requestAnimationFrame(moveFrame);
+  }
+  const onKeyUp = (e) => {
+    fast = e.shiftKey;
+    if (held.delete(String(e.key).toLowerCase()) && !held.size) moveT = 0;
+  };
+  document.addEventListener("keyup", onKeyUp, true);
+  window.addEventListener("blur", () => held.clear());
   const onKey = (e) => {
     if (root.hidden || e.target.closest?.("input, textarea, select")) return;
     const k = e.key, mod = e.ctrlKey || e.metaKey;
+    fast = e.shiftKey;
+    if (!mod && !e.altKey && moveKey(k)) {
+      e.preventDefault(); e.stopPropagation();
+      held.add(String(k).toLowerCase());
+      if (!moveRaf) { moveT = 0; moveRaf = requestAnimationFrame(moveFrame); }
+      return;
+    }
     const act = (fn) => { e.preventDefault(); e.stopPropagation(); fn(); };
     if (mod && !e.altKey && (k === "c" || k === "C")) return act(copySel);
     if (mod && !e.altKey && (k === "v" || k === "V")) return act(pasteHere);
@@ -1032,7 +1060,7 @@ export async function open(api) {
     const v = new THREE.Vector3(x, l.f, -z).project(camera), r = canvas.getBoundingClientRect();
     return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height, floor: l.floor, stand: l.stand };
   };
-  window.__v3d = { ready, state: () => ({ ...S, hover: null, asset: S.asset ? { kind: S.asset.kind, n: S.asset.cubes.length } : null, chunks: chunks.size, problems: problems.problems.map((p) => ({ ...p })) }), pick, screenOf };
+  window.__v3d = { ready, state: () => ({ ...S, moving: held.size, hover: null, asset: S.asset ? { kind: S.asset.kind, n: S.asset.cubes.length } : null, chunks: chunks.size, problems: problems.problems.map((p) => ({ ...p })) }), pick, screenOf };
 
   return {
     refresh() { paintMarkers(); },

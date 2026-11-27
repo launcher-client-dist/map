@@ -184,3 +184,21 @@ test("the objects: every prop and monster model parses, feet at the origin; icon
   }
   assert.ok(Object.keys(idx.monsters).length >= 90, "the marker monsters' models");
 });
+
+test("W A S D move relative to the view's heading: after a 90° turn W goes along the new forward", async () => {
+  const { moveDir, moveStep, moveKey, SPEED, FAST } = await import("../map3d/move.js");
+  const near = (a, b) => assert.ok(Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[1] - b[1]) < 1e-9, JSON.stringify([a, b]));
+  near(moveDir(0, ["w"]), [0, 1]);        // looking north: W is +z
+  near(moveDir(0, ["d"]), [1, 0]);        // D is east, the picture's right
+  near(moveDir(90, ["w"]), [1, 0]);       // one E (looking east): W is +x
+  near(moveDir(90, ["d"]), [0, -1]);      // and D is south
+  near(moveDir(180, ["ArrowUp"]), [0, -1]);
+  near(moveDir(270, ["ArrowLeft"]), [0, -1]);   // looking west, left is south
+  near(moveDir(0, ["w", "s"]), [0, 0]);   // they cancel out
+  const diag = moveDir(0, ["w", "d"]);
+  near(diag, [Math.SQRT1_2, Math.SQRT1_2]); // a diagonal is no faster
+  near(moveStep(0, ["w"], 0.05, 2), [0, SPEED * 2 * 0.05]);        // by zoom
+  near(moveStep(0, ["w"], 0.05, 1, true), [0, SPEED * FAST * 0.05]); // Shift
+  near(moveStep(0, ["w"], 5, 1), [0, SPEED * 0.1]);                 // a long frame is capped
+  assert.equal(moveKey("W") !== null && moveKey("q") === null && moveKey("e") === null, true);
+});
