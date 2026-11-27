@@ -6,6 +6,7 @@
 // right-handed), so everything inside it is in game coordinates.
 import * as THREE from "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.170.0/three.module.min.js";
 import { parseGlb } from "./glb.js";
+import { AssetStore, glbJson } from "./assets-cache.js";
 import * as CD from "./cdata.js";
 import { translator3 } from "./words3d.js";
 import { sliderValue } from "./slider.js";
@@ -53,25 +54,24 @@ export async function open(api) {
   let meta;
   try { meta = await (await fetch(new URL("meta.json", BASE))).json(); }
   catch { root.append(h("div", { class: "v3d-msg" }, t3("noData"))); return { refresh() {}, show() {}, hide() { root.hidden = true; }, goTo() {} }; }
-  // the Simplified ground (the game's ground meshes, flat colours): the assets site's "simplified" look
-  // (assets.opengea.tech: latest.json names the version's manifest; each chunk's file is named by its content, so the
-  // browser keeps it until a new version changes that chunk); ?assets= another site. None there: the blocks.
-  const ASSETS = new URL(q.get("assets") || "https://assets.opengea.tech/");
-  let simplified = null;
-  try {
-    const latest = await (await fetch(new URL("latest.json", ASSETS), { cache: "no-cache" })).json();
-    simplified = await (await fetch(new URL(latest.simplified, ASSETS))).json();
-  } catch { simplified = null; }
-  const bUrl = (key) => { const [v, hash] = simplified.chunks[key].split("/"); return new URL(`${v}/simplified/${hash}.glb.gz`, ASSETS); };
-  const bSet = new Set(simplified ? Object.keys(simplified.chunks) : []);
-  const hasB = bSet.size > 0;
+  // the ground's looks from the assets site (assets.opengea.tech; ?assets= another site), through assets-cache.js (the
+  // same module as the web client's): latest.json names each look's manifest; each chunk's file is named by its
+  // content and kept in this browser's cache, so a new version downloads only the chunks it changed.
+  //   f "Complete": the client's own ground, caves and props with the game's textures (compressed glTF; the default)
+  //   b "Simplified": the game's ground meshes, one colour per surface, props as simple shapes
+  //   c "Blocky": the server's own grid (this repo's c/); always there, and wherever a chunk has no other look
+  const ASSETS = q.get("assets") || "https://assets.opengea.tech/";
+  const open = (kind) => new AssetStore(ASSETS, kind).init().catch((e) => { console.warn(`map3d assets ${kind}:`, e.message); return null; });
+  const [storeB, storeF] = await Promise.all([open("simplified"), open("full")]);
+  const bSet = storeB ? storeB.keys() : new Set(), fSet = storeF ? storeF.keys() : new Set();
+  const hasB = bSet.size > 0, hasF = fSet.size > 0;
   const chunkSet = new Set(meta.chunks.map(([a, b]) => a + "_" + b));
 
   // ---- state
   const S = {
     objects: q.get("objects") === "a" ? "a" : "c", clean: q.get("clean") === "1", help: q.get("help") === "1",
     x: 0, z: 0, y: 0, yaw: 0, pitch: PITCH, zoom: 1, free: false,
-    look: hasB && q.get("look") !== "c" ? "b" : "c", check: q.get("check") !== "0", walls: q.get("walls") === "1", tops: q.get("tops") === "1",
+    look: ["f", "b", "c"].includes(q.get("look")) ? q.get("look") : hasF ? "f" : hasB ? "b" : "c", check: q.get("check") !== "0", walls: q.get("walls") === "1", tops: q.get("tops") === "1",
     floor: q.get("floor") || "all", cut: q.get("cut") != null && q.get("cut") !== "" ? +q.get("cut") : null,
     tool: null, pending: null, hover: null, clip: [], asset: null,
     // (the ramp or bridge being placed: its kind, first end, plan and check; each kind's width)
@@ -119,7 +119,8 @@ export async function open(api) {
   scene.add(world);
   const layersB = new THREE.Group(), layersC = new THREE.Group(), wallsG = new THREE.Group(), marksG = new THREE.Group(), xray = new THREE.Group();
   const topsG = new THREE.Group();   // the heights and the walkable tops ("Altura e piso", ?tops=1)
-  world.add(layersB, layersC, wallsG, topsG, marksG, xray);
+  const layersF = new THREE.Group();   // the Complete look's chunks
+  world.add(layersF, layersB, layersC, wallsG, topsG, marksG, xray);
   const cutPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1000);
   const groundMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide, clippingPlanes: [cutPlane] });
   const waterMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide, transparent: true, opacity: 0.78, depthWrite: false, clippingPlanes: [cutPlane] });
@@ -130,7 +131,8 @@ export async function open(api) {
   // while the placement check is on (a crown hides the spot under it; the game hides the crowns near its character)
   const propsMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide, clippingPlanes: [cutPlane] });
   const crownsMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide, clippingPlanes: [cutPlane] });
-  const fadeProps = (on) => { crownsMat.visible = !on; };
+  const crownsF = [];   // the Complete look's crown materials (its MeshHider parts): hidden with the Simplified crowns
+  const fadeProps = (on) => { crownsMat.visible = !on; for (const m of crownsF) m.visible = !on; };
 
   // ---- chunks
   const chunks = new Map();   // key -> {a, b, c (decoded), bMesh, cMesh, wMesh, loading}
@@ -147,17 +149,18 @@ export async function open(api) {
     for (const [a, b] of want) {
       const key = CD.chunkKey(a, b);
       if (chunks.has(key)) continue;
-      const ch = { a, b, c: null, bMesh: null, cMesh: null, wMesh: null };
+      const ch = { a, b, c: null, bMesh: null, cMesh: null, wMesh: null, fMesh: null, fLoading: false };
       chunks.set(key, ch);
       loadingN++;
       paintStatus();
       ch.ready = Promise.all([
         fetch(new URL(`c/${key}.bin${meta.gz ? ".gz" : ""}`, BASE)).then((r) => (r.ok ? r.arrayBuffer() : null)).then(unpack),
-        bSet.has(key) ? fetch(bUrl(key)).then((r) => (r.ok ? r.arrayBuffer() : null)).then(unpack) : null,
+        bSet.has(key) ? storeB.chunk(key).then(unpack) : null,
       ]).then(([cb, gb]) => {
         if (!chunks.has(key)) return;
         if (cb) { ch.c = CD.decodeChunk(cb); ch.cMesh = buildC(ch.c); ch.wMesh = buildWalls(ch.c); ch.tMesh = buildTops(ch.c); layersC.add(ch.cMesh); wallsG.add(ch.wMesh); topsG.add(ch.tMesh); }
         if (gb) { ch.bMesh = buildB(parseGlb(gb)); layersB.add(ch.bMesh); }
+        loadF(ch);
         syncGround(ch);
       }).catch((e) => console.warn("map3d", key, e)).finally(() => { surfaceMemo.clear(); loadingN--; paintStatus(); paintFloors(); paintMarkers(); draw(); });
     }
@@ -165,17 +168,71 @@ export async function open(api) {
     const [a0, b0] = CD.chunkOf(Math.round(S.x), Math.round(S.z));
     for (const [key, ch] of chunks) {
       if (keys.has(key) || Math.max(Math.abs(ch.a - a0), Math.abs(ch.b - b0)) <= 5) continue;
-      for (const m of [ch.bMesh, ch.cMesh, ch.wMesh, ch.tMesh]) if (m) { m.parent?.remove(m); m.traverse((o) => o.geometry?.dispose()); }
+      for (const m of [ch.fMesh, ch.bMesh, ch.cMesh, ch.wMesh, ch.tMesh]) if (m) { m.parent?.remove(m); m.traverse((o) => o.geometry?.dispose()); }
       chunks.delete(key);
     }
   }
 
-  // Simplified: each chunk draws its game ground where it has one, its blocks where it hasn't (no holes in the view)
-  function syncGround(ch) { if (ch.cMesh) ch.cMesh.visible = S.look === "c" || !ch.bMesh; }
-  // what a pointer hits: the ground shown (the Simplified meshes, and the blocks of the chunks without them)
+  // each chunk draws the chosen look where it has it, else the next one down (Complete, Simplified, the blocks): no holes
+  function shownOf(ch) {
+    if (S.look === "f" && ch.fMesh) return ch.fMesh;
+    if (S.look !== "c" && ch.bMesh) return ch.bMesh;
+    return ch.cMesh;
+  }
+  function syncGround(ch) {
+    const shown = shownOf(ch);
+    for (const m of [ch.fMesh, ch.bMesh, ch.cMesh]) if (m) m.visible = m === shown;
+  }
+  // what a pointer hits: the ground shown; under the Complete look, the chunk's Simplified ground (drawn or not: a ray
+  // tests hidden meshes too), the same game ground without the grass cards and with its props as simple shapes, so a
+  // click lands on the ground and its standing layer, as with the Simplified look
   function groundTargets() {
-    if (S.look !== "b") return [layersC];
-    return [layersB, ...[...chunks.values()].filter((ch) => ch.cMesh && !ch.bMesh).map((ch) => ch.cMesh)];
+    return [...chunks.values()].map((ch) => (S.look === "f" ? ch.bMesh || shownOf(ch) : shownOf(ch))).filter(Boolean);
+  }
+
+  // the Complete look's chunk: loaded once the look is on (three.js's glTF loader, meshopt; the game's textures sampled
+  // nearest, pixel art), drawn with the cut plane; its "crown" materials (the tree crowns) fade with the check
+  let gltfLoader = null;
+  function fullLoader() {
+    if (!gltfLoader) gltfLoader = (async () => {
+      const [{ GLTFLoader }, { MeshoptDecoder }] = await Promise.all([
+        import("three/addons/loaders/GLTFLoader.js"), import("three/addons/libs/meshopt_decoder.module.js")]);
+      const manager = new THREE.LoadingManager();
+      manager.setURLModifier((u) => storeF.blobFor(u) || u);   // (the textures: from the cache, assets-cache.js)
+      const l = new GLTFLoader(manager);
+      l.setMeshoptDecoder(MeshoptDecoder);
+      return l;
+    })();
+    return gltfLoader;
+  }
+  function fullMaterial(m, hasColor) {
+    if (m.map) {
+      m.map.colorSpace = THREE.NoColorSpace;   // (the texture's bytes as they are, like the other looks' colours)
+      m.map.magFilter = m.map.minFilter = THREE.NearestFilter;
+      m.map.generateMipmaps = false;
+    }
+    const out = new THREE.MeshLambertMaterial({ map: m.map || null, color: m.color, vertexColors: hasColor, side: THREE.DoubleSide,
+      alphaTest: m.alphaTest || 0, transparent: m.transparent, opacity: m.opacity, depthWrite: !m.transparent, clippingPlanes: [cutPlane] });
+    if (m.name === "crown") { out.visible = !S.check; crownsF.push(out); }
+    return out;
+  }
+  function loadF(ch) {
+    const key = CD.chunkKey(ch.a, ch.b);
+    if (S.look !== "f" || ch.fMesh || ch.fLoading || !fSet.has(key)) return;
+    ch.fLoading = true;
+    const url = storeF.chunkUrl(key);
+    storeF.chunk(key).then(unpack).then(async (buf) => {
+      if (!buf || !chunks.has(key)) return;
+      await storeF.textures(glbJson(buf));
+      const l = await fullLoader();
+      const g = await new Promise((ok, bad) => l.parse(buf, new URL("./", url).href, ok, bad));
+      g.scene.traverse((n) => { if (n.isMesh) n.material = fullMaterial(n.material, !!n.geometry.attributes.color); });
+      if (!chunks.has(key)) return;
+      ch.fMesh = g.scene;
+      layersF.add(ch.fMesh);
+      syncGround(ch);
+      draw();
+    }).catch((e) => console.warn("map3d full", key, e)).finally(() => { ch.fLoading = false; });
   }
 
   function buildB(g) {
@@ -376,7 +433,7 @@ export async function open(api) {
   const surfaceMemo = new Map();   // "x,z,floor" -> height (a chunk's mesh only changes when it loads: cleared then)
   function surfaceOf(x, z, floor) {
     const f = standOf(x, z, floor);
-    if (f == null || S.look !== "b") return f;
+    if (f == null || S.look === "c") return f;   // (Complete: the Simplified ground mesh, the same ground without its props)
     const key = x + "," + z + "," + floor;
     if (surfaceMemo.has(key)) return surfaceMemo.get(key);
     world.updateMatrixWorld(true);   // (a chunk added since the last frame has no world matrix yet: the ray would miss it)
@@ -821,8 +878,8 @@ export async function open(api) {
   const lookBox = h("div", { class: "v3d-card v3d-look" });
   function paintLook() {
     lookBox.replaceChildren(...[h("span", { class: "v3d-k" }, t3("look")),
-      // (the Simplified ground only where its local data is: the public map shows the server's blocks)
-      hasB ? pill("data-look", [["b", t3("lookB"), t3("lookBHelp")], ["c", t3("lookC"), t3("lookCHelp")]], S.look, (v) => { S.look = v; applyLook(); }) : null,
+      hasB || hasF ? pill("data-look", [hasF ? ["f", t3("lookF"), t3("lookFHelp")] : null, hasB ? ["b", t3("lookB"), t3("lookBHelp")] : null,
+        ["c", t3("lookC"), t3("lookCHelp")]].filter(Boolean), S.look, (v) => { S.look = v; applyLook(); }) : null,
       togg("data-check", t3("lookCheck") + " (C)", t3("lookCheckHelp"), S.check, () => toggle("check")),
       togg("data-walls", t3("lookWalls") + " (I)", t3("lookWallsHelp"), S.walls, () => toggle("walls")),
       togg("data-tops", t3("lookTops") + " (H)", t3("lookTopsHelp"), S.tops, () => toggle("tops")),
@@ -1421,9 +1478,9 @@ export async function open(api) {
   function goTo(x, z) { S.x = x; S.z = z; update(); }
 
   function applyLook() {
-    layersB.visible = S.look === "b";
-    layersC.visible = true;
-    for (const ch of chunks.values()) syncGround(ch);
+    layersF.visible = layersB.visible = layersC.visible = true;   // (each chunk shows one of its looks: syncGround)
+    for (const ch of chunks.values()) { loadF(ch); syncGround(ch); }
+    surfaceMemo.clear();
     wallsG.visible = S.walls;
     topsG.visible = S.tops;
     xray.visible = S.check;

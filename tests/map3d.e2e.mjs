@@ -2,6 +2,8 @@
 // canal, and check that the page's link holds them (the same markers the 2D page makes) and that the check flags the
 // canal. Needs Microsoft Edge (or Chrome: BROWSER=path) and the map3d/ test data; not in `npm test`.
 //   node tests/map3d.e2e.mjs [--shots DIR]
+// OG_ASSETS=<a local assets site's URL>: the looks from there (its certificate may be self-signed), else assets.opengea.tech
+// OG_GPU=1: the GPU instead of the software renderer
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { readFile, mkdtemp, writeFile, rm } from "node:fs/promises";
@@ -32,7 +34,11 @@ const port = server.address().port;
 
 const profile = await mkdtemp(join(tmpdir(), "map3d-e2e-"));
 const dbg = 9300 + Math.floor(Math.random() * 500);
-const browser = spawn(BROWSER, ["--headless=new", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", `--remote-debugging-port=${dbg}`,
+const ASSETS = process.env.OG_ASSETS ? `&assets=${encodeURIComponent(process.env.OG_ASSETS)}` : "";
+// OG_GPU=1: the machine's GPU (ANGLE D3D11) instead of the software renderer (the Complete look's textured meshes are
+// slow in software: the keyboard glide's per-frame steps then fall short of the timings below)
+const GL = process.env.OG_GPU === "1" ? ["--use-angle=d3d11", "--ignore-gpu-blocklist"] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"];
+const browser = spawn(BROWSER, ["--headless=new", ...GL, "--ignore-certificate-errors", `--remote-debugging-port=${dbg}`,
   `--user-data-dir=${profile}`, "--window-size=1440,900", "--no-first-run", "about:blank"], { stdio: "ignore" });
 
 let ws, seq = 0, netBytes = 0;
@@ -90,7 +96,7 @@ try {
   });
   await cdp("Page.enable");
   await cdp("Runtime.enable");
-  const nav = await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=-238,174&zoom=1.3` });
+  const nav = await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=-238,174&zoom=1.3${ASSETS}` });
   if (nav.errorText) throw new Error("navigate: " + nav.errorText);
   await sleep(1500);
   const up = await js(`(async () => { for (let i = 0; i < 200 && !window.__v3d; i++) await new Promise((r) => setTimeout(r, 100));
@@ -253,7 +259,7 @@ try {
 
   // a ramp by clicks: the Ramp tool (5), the low end on the ground by a rope's landing, the high end up on the deck 5
   // cubes over it (6 cells east): the check walks it both ways (green); the link holds it; copy/paste; undo / redo
-  await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=-259,178&zoom=0.8&yaw=180&pitch=45` });
+  await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=-259,178&zoom=0.8&yaw=180&pitch=45${ASSETS}` });
   let rampUp = false;
   for (let i = 0; i < 120 && !rampUp; i++) {
     await sleep(500);
@@ -349,7 +355,7 @@ try {
   // a bridge by clicks: the Bridge tool (6, the swamp's stock bridge by default), one bank of the swamp channel, then the
   // other 11 cells east: the far end snaps to the 12 cells the prefab takes (its segments of 4); it walks both ways
   // (green); the link holds the prefab and the length; undo / redo; copy/paste
-  await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=205,-139&zoom=0.8&pitch=40` });
+  await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=205,-139&zoom=0.8&pitch=40${ASSETS}` });
   let bridgeUp = false;
   for (let i = 0; i < 120 && !bridgeUp; i++) {
     await sleep(500);
@@ -477,7 +483,7 @@ try {
   netBytes = 0;
   console.log("fast 3G: navigating", new Date().toISOString());
   const t3g = Date.now();
-  await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=-234,175` });
+  await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en&view=3d&at=-234,175${ASSETS}` });
   // (short checks from here, one a second: a long evaluate would die with the page the navigation replaces)
   let loaded = null;
   for (let i = 0; i < 300 && !loaded; i++) {
