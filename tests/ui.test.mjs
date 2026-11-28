@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { floorCounts, paneFloor, openingFloors, level, stepFloor, floorLinks } from "../floors.js";
+import { seenFromAbove, floorCounts, paneFloor, openingFloors, level, stepFloor, floorLinks } from "../floors.js";
 import { parsePlace, placeFloors, parseFloor, searchMarkers, nearMarkers, fold } from "../goto.js";
 
 const FLOORS = JSON.parse(readFileSync(new URL("../tiles/0.2.1/meta.json", import.meta.url))).floors;
@@ -133,4 +133,11 @@ test("owners: a marker takes the floor whose ledge the band shows, else the pane
   assert.equal(cellFloor("-9", floorCode("s") + 1), "s");
   assert.equal(cellFloor("-9", 0), "-9");                     // the floor's own cell
   assert.equal(cellFloor("-9", undefined), "-9");             // no owner data (an old tile set): the pane's floor
+});
+
+test("markers of the ground a hole looks down on: the floor's own, and the surface's seen through a slice", () => {
+  assert.ok(seenFromAbove("3", "3"));
+  assert.ok(seenFromAbove("s", "3") && seenFromAbove("s", "0") && seenFromAbove("s", "10"));
+  assert.ok(!seenFromAbove("s", "-4"), "a cave's ground is not the surface's");
+  assert.ok(!seenFromAbove("-4", "3") && !seenFromAbove("s", null) && !seenFromAbove("6", "3"));
 });

@@ -101,3 +101,11 @@ export function ownerTile(x, z) {
 export function cellFloor(floor, value) {
   return value ? floorOf(value - 1) : floor;
 }
+
+// a hole in a pane's view shows the ground below it: a marker of another floor is seen there (dimmed) when that floor is
+// the ground's own floor (lookFloor, the owner tile's green), or is the surface and the ground is a slice 0 .. 10 (the
+// surface's ground is under the same cells those slices draw: a spawn put on it from the 3D view is the surface's)
+export function seenFromAbove(markerFloor, lookFloor) {
+  if (lookFloor == null) return false;
+  return markerFloor === lookFloor || (markerFloor === "s" && /^\d+$/.test(String(lookFloor)));
+}
