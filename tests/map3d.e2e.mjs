@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
-import { decode } from "../maplink.js";
+import { decode, encode } from "../maplink.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BROWSER = process.env.BROWSER || "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
@@ -483,6 +483,24 @@ try {
   assert.equal((await js("window.__state()")).markers.filter((m) => m.kind === "fill").length, 1, "redo");
   console.log("fill: placed by clicks, the fewest cells (5), green, in the link, the block list, undo/redo");
   }
+  // markers made in the 3D view stand on the surface, over ground a floor-6 view looks down on: the 2D floor-6 pane draws
+  // them (dimmed), a surface spawn and a bridge; the 2D surface pane draws them as they are; the link keeps their floor
+  const link = await encode({ tiles: "0.2.1", view: { x: -365, z: -80, zoom: 3, floors: ["6"] }, markers: [
+    { id: 1, kind: "spawn", floor: "s", locked: false, x: -373, z: -84, fields: { monster: "Minotaur", count: 1, radius: 3 } },
+    { id: 2, kind: "bridge", floor: "s", locked: false, points: [[-356, -75], [-356, -81]], fields: { lo: 3, hi: 3, width: 3, pieces: "S|plain|6|3|0" } },
+    { id: 3, kind: "spawn", floor: "6", locked: false, x: -375, z: -61, fields: { monster: "Minotaur", count: 1, radius: 3 } }] });
+  await cdp("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=en#${link}` });
+  let panes = null;
+  for (let i = 0; i < 60 && !panes; i++) {
+    await sleep(500);
+    try {
+      const r = await cdp("Runtime.evaluate", { returnByValue: true, expression: `(() => { const s = window.__state && window.__state(); return s && s.panes && s.panes[0].spots.length >= 2 ? s.panes : null; })()` });
+      panes = r.result?.value || null;
+    } catch { /* (between two documents) */ }
+  }
+  assert.ok(panes && panes[0].floor === "6" && [1, 3].every((id) => panes[0].spots.includes(id)), "the 2D floor-6 pane draws the 3D-made surface spawn: " + JSON.stringify(panes));
+  assert.equal((await decode(await js("location.hash"))).markers.find((m) => m.id === 1).floor, "s", "the link keeps the marker's floor");
+  console.log("2D: the 3D-made surface spawn shows on the floor-6 pane");
   console.log("main flow passed", new Date().toISOString());
   // one view on DevTools' "Fast 3G" network (562.5 ms latency, ~180 KB/s down), the cache off, as a first visit: how
   // long until every chunk in view is drawn (the page, three.js, the data); a number for the report, not a limit

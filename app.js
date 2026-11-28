@@ -124,6 +124,7 @@ function el(tag, attrs = {}, ...kids) {
 
 // ------------------------------------------------------------------------------------------------ state
 let tileIndex, tileMeta, tileVersion;
+let ownerMeta = null, ownerVersion = null;   // the owner tiles' list and set: the opened set's, else the latest set's (a link of a set from before them)
 let opened = { markers: [], next: 0, base: 0, was: [] };   // the link as opened: what Save compares against
 let markers = [];
 let nextId = 0;
@@ -254,24 +255,32 @@ function tileLayer(floor, opacity = 1) {
 // sign on the -7 ledge, placed on the -9 view). Tiles load per pane floor and view; a link from a set without owners
 // works as before (every cell the pane's own).
 const owners = new Map();   // "floor|i_j" -> Uint8Array(65536) of red values, or a Promise while it loads
+const looks = new Map();    // "floor|i_j" -> Uint8Array(65536) of green values: the floor code + 1 of the ground a hole in this view looks down on
 function ownerValue(floor, x, z) {
   const { key, at } = FL.ownerTile(x, z);
   const got = owners.get(floor + "|" + key);
   return got instanceof Uint8Array ? got[at] : undefined;
 }
+// the floor of the ground that cell's hole looks down on in this pane's view (the owner tile's green), or null
+function lookFloor(floor, x, z) {
+  const { key, at } = FL.ownerTile(x, z);
+  const g = looks.get(floor + "|" + key)?.[at];
+  return g ? ML.floorOf(g - 1) : null;
+}
 function loadOwner(floor, key) {
   const k = floor + "|" + key;
   if (owners.has(k)) return owners.get(k);
-  if (!(tileMeta.owner?.[floor] || []).includes(key)) { owners.set(k, new Uint8Array(65536)); return owners.get(k); }
+  if (!(ownerMeta?.[floor] || []).includes(key)) { owners.set(k, new Uint8Array(65536)); return owners.get(k); }
   const p = (async () => {
     try {
-      const img = await createImageBitmap(await (await fetch(`tiles/${tileVersion}/owner/${floor}/${key}.png`)).blob());
+      const img = await createImageBitmap(await (await fetch(`tiles/${ownerVersion}/owner/${floor}/${key}.png`)).blob());
       const c = document.createElement("canvas");
       c.width = c.height = 256;
       const g = c.getContext("2d", { willReadFrequently: true });
       g.drawImage(img, 0, 0);
-      const px = g.getImageData(0, 0, 256, 256).data, out = new Uint8Array(65536);
-      for (let i = 0; i < 65536; i++) out[i] = px[i * 4 + 3] ? px[i * 4] : 0;
+      const px = g.getImageData(0, 0, 256, 256).data, out = new Uint8Array(65536), gr = new Uint8Array(65536);
+      for (let i = 0; i < 65536; i++) { out[i] = px[i * 4 + 3] ? px[i * 4] : 0; gr[i] = px[i * 4 + 3] ? px[i * 4 + 1] : 0; }
+      looks.set(k, gr);
       owners.set(k, out);
       for (const q of panes) if (q.floor === floor) drawPane(q);   // markers of the floor above now show here
       return out;
@@ -282,12 +291,12 @@ function loadOwner(floor, key) {
 }
 // the owner tiles a pane's view touches
 function loadOwnersInView(p) {
-  if (p.floor === "s" || !tileMeta.owner?.[p.floor] || !p.map._loaded) return;   // (no view yet: its moveend loads them)
+  if (p.floor === "s" || !ownerMeta?.[p.floor] || !p.map._loaded) return;   // (no view yet: its moveend loads them)
   for (const key of FL.tilesInView(viewCorners(p))) loadOwner(p.floor, key);
 }
 // the floor of cell (x, z) on pane floor `floor`, then fn(floor): at once when its owner tile is loaded, else once it is
 function withCellFloor(floor, x, z, fn) {
-  if (floor === "s" || !tileMeta.owner?.[floor]) return fn(floor);
+  if (floor === "s" || !ownerMeta?.[floor]) return fn(floor);
   const v = ownerValue(floor, x, z);
   if (v !== undefined) return fn(FL.cellFloor(floor, v));
   Promise.resolve(loadOwner(floor, FL.ownerTile(x, z).key)).then(() => fn(FL.cellFloor(floor, ownerValue(floor, x, z))));
@@ -955,9 +964,15 @@ function drawPane(p) {
   for (const m of mine.sort((a, b) => order(a) - order(b))) drawMarker(p, m);
   // markers of another floor standing on a ledge this band shows (its owner pixel names their floor): drawn dimmed
   if (p.floor !== "s") for (const m of markers) {
-    if (m.floor === p.floor || !("x" in m) || !shown(m)) continue;
-    const v = ownerValue(p.floor, m.x, m.z);
-    if (v && FL.cellFloor(p.floor, v) === m.floor) drawMarker(p, m, true);
+    if (m.floor === p.floor || !shown(m)) continue;
+    const at = "x" in m ? [m.x, m.z] : m.points?.[0];   // (a ramp or bridge: where its line starts)
+    if (!at) continue;
+    const v = ownerValue(p.floor, at[0], at[1]);
+    if (v && FL.cellFloor(p.floor, v) === m.floor) { drawMarker(p, m, true); continue; }
+    // a hole in this view shows ground below: the markers of that ground's floor are drawn dimmed there too (the surface's
+    // ground is the slices 0 .. 10 of the cells it is under: a spawn put on it from the 3D view is the surface's)
+    const lf = lookFloor(p.floor, at[0], at[1]);
+    if (FL.seenFromAbove(m.floor, lf)) drawMarker(p, m, true);
   }
   // the end markers of ropes, holes and portals from other floors that land on this one (and levers that send here)
   for (const m of markers) {
@@ -3088,6 +3103,10 @@ async function start() {
   if (state && state.tiles && tileIndex.sets[state.tiles]) tileVersion = state.tiles;
   else if (state && state.tiles) banner(t("oldTiles", state.tiles));
   tileMeta = await (await fetch(`tiles/${tileVersion}/meta.json`)).json();
+  ownerMeta = tileMeta.owner || null; ownerVersion = tileVersion;
+  if (!ownerMeta && tileIndex.latest !== tileVersion) {   // (a set from before the owner tiles: the latest set's, as a floor's ledges rarely move)
+    try { const lm = await (await fetch(`tiles/${tileIndex.latest}/meta.json`)).json(); ownerMeta = lm.owner || null; ownerVersion = tileIndex.latest; } catch { /* none */ }
+  }
   let view = { x: 0, z: 0, zoom: -1, floors: ["s"] };
   if (state) {
     // a player's Save always compares with the link staff sent (rebuilt from the saved link's own change list, so a
@@ -3143,7 +3162,7 @@ async function start() {
   if (reachOn) setReach(true); else paintReachCtl();
   // read-only hooks for the page's browser tests
   Object.defineProperty(window, "__panes", { get: () => panes });   // the panes now (side by side rebuilds them)
-  window.__state = () => ({ markers: clone(markers), nextId, selected, tool, destFor, multi: [...multi], stamp: { ...stamp }, mode, undo: undoStack.length });
+  window.__state = () => ({ markers: clone(markers), nextId, selected, tool, destFor, multi: [...multi], stamp: { ...stamp }, mode, undo: undoStack.length, panes: panes.map((p) => ({ floor: p.floor, spots: (p.spots || []).map((q) => q.id) })) });
   window.addEventListener("resize", drawLinksSoon);
   if (new URLSearchParams(location.search).get("view") === "3d") setView("3d");
 }
